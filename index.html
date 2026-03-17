@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PEGmemo</title>
+
+<!--
+  ================================================================
+  PEGmemo  機能索引
+  各ワードでコード内検索するとその機能の先頭に飛べます
+
+  #BASE          CSS変数・リセット・レイアウト基盤
+  #HEADER        ヘッダーバー（タイトル・ハンバーガーボタン・Undo/Redo）
+  #MENU          ハンバーガーメニュー（保存・新規・履歴）
+  #TOOLBAR       ツールバー（書式ボタン・罫線・テンプレ選択）
+  #EDITOR        テキストエリア本体
+  #PREVIEW       プレビュー表示（HTML/MD切り替え）
+  #STATUS        ステータスバー（文字数カウント・クリアボタン）
+  #AUTOSAVE      localStorage自動保存・復元
+  #TOAST         トースト通知
+  #MODAL         HTML出力モーダル
+  #STATE         アプリ状態・DOM参照
+  #DB            IndexedDBライブラリ（文書の保存・読出・更新・削除）
+  #UNDO          Undo / Redo
+  #TEMPLATE      テンプレート定義・挿入処理
+  #CONVERT       テキスト → HTML変換エンジン
+  #INIT          初期化
+  ================================================================
+-->
+
+
+<!-- ══════════════ #BASE CSS変数・リセット・レイアウト基盤 ══════════════ -->
+<style>
+  /* カラーパレット（CSS変数） */
+  :root {
+    --bg: #faf9f7;
+    --surface: #ffffff;
+    --border: #e0ddd8;
+    --border-light: #eae7e2;
+    --text: #2c2c2c;
+    --text-mid: #666;
+    --text-light: #4a4a4a;
+    --accent: #B982BD;
+    --accent-hover: #AE79BA;
+    --accent-light: #ECDAED;
+    --toolbar-bg: #F7EDF6;
+    --btn-bg: #EFCBF7;
+    --btn-hover: #E9E1EB;
+    --danger: #c45;
+  }
+
+  /* リセット */
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  /* ベースレイアウト */
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* アプリ全体の縦並びレイアウト */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    height: 100dvh;
+  }
+
+  /* 共通ボタン */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    min-height: 34px;
+    transition: background 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .btn:hover, .btn:active { background: var(--btn-hover); }
+  .btn:disabled { opacity: 0.35; pointer-events: none; }
+
+  /* アクセントカラーボタン */
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-accent:hover, .btn-accent:active { background: var(--accent-hover); }
+
+  /* アイコンボタン（正方形） */
+  .btn-icon {
+    padding: 6px 8px;
+    font-size: 16px;
+    min-width: 34px;
+  }
+</style>
+
+
+<!-- ══════════════ #HEADER ヘッダーバー（タイトル・ハンバーガーボタン・Undo/Redo） ══════════════ -->
+<style>
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    min-height: 44px;
+    gap: 6px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .app-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    margin-right: 4px;
+  }
+  /* ハンバーガーボタン */
+  .btn-hamburger {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    width: 34px;
+    height: 34px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .btn-hamburger:active { background: var(--btn-hover); }
+  .btn-hamburger span {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: var(--text);
+    border-radius: 1px;
+  }
+</style>
+
+<!-- ヘッダーHTML -->
+<body>
+<div class="app">
+  <div class="header">
+    <div class="header-left">
+      <button class="btn-hamburger" id="btnHamburger" title="メニュー">
+        <span></span><span></span><span></span>
+      </button>
+      <span class="app-title">PEG memo</span>
+      <button class="btn btn-icon" id="btnUndo" title="元に戻す" disabled>↩</button>
+      <button class="btn btn-icon" id="btnRedo" title="やり直し" disabled>↪</button>
+    </div>
+    <div class="header-right">
+      <button class="btn" id="btnPreview">プレビュー</button>
+      <button class="btn btn-accent" id="btnHtmlOutput">HTML出力</button>
+    </div>
+  </div>
+
+
+<!-- ══════════════ #TOOLBAR ツールバー（書式ボタン・罫線・テンプレ選択） ══════════════ -->
+<style>
+  .toolbar {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    gap: 4px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border-light);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .toolbar .btn {
+    font-size: 12px;
+    padding: 5px 10px;
+    min-height: 30px;
+    border-color: var(--border-light);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .toolbar .btn:hover, .toolbar .btn:active {
+    background: var(--btn-hover);
+  }
+  /* ツールバー内の区切り線 */
+  .toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    flex-shrink: 0;
+    margin: 0 2px;
+  }
+  /* ツールバー内セレクトボックス（罫線・テンプレ共通） */
+  .template-select {
+    font-size: 12px;
+    font-family: inherit;
+    padding: 5px 6px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    min-height: 30px;
+    flex-shrink: 0;
+    max-width: 80px;
+  }
+</style>
+
+<!-- ツールバーHTML -->
+  <div class="toolbar" id="toolbar">
+    <button class="btn" data-action="h3">H3</button>
+    <button class="btn" data-action="h4">H4</button>
+    <div class="toolbar-sep"></div>
+    <select class="template-select" id="hrSelect">
+      <option value="">罫線</option>
+      <option value="hr">罫線（通常）</option>
+      <option value="hr-light">罫線（薄）</option>
+      <option value="hr-xlight">罫線（極薄）</option>
+    </select>
+    <div class="toolbar-sep"></div>
+    <select class="template-select" id="templateSelect">
+      <option value="">テンプレ</option>
+      <option value="top-anchor">ページトップアンカー</option>
+      <option value="title-template">タイトルテンプレ</option>
+      <option value="lead-disclaimer">リード文＋免責文</option>
+      <option value="toc">目次ボックス</option>
+      <option value="end">END</option>
+      <option value="end-note1">END下①：解釈について</option>
+      <option value="end-note2">END下②：歌詞引用</option>
+      <option value="end-note3">END下③：転載禁止</option>
+      <option value="footer1">末尾①：考察方法リンク</option>
+      <option value="footer2">末尾②：作成プロセスリンク</option>
+      <option value="top-button">ページトップボタン</option>
+    </select>
+  </div>
+
+
+<!-- ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════ -->
+<style>
+  /* プレビューモード中のインジケーター帯 */
+  .preview-indicator {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 12px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .preview-indicator.active { display: flex; }
+
+  /* プレビュー本体 */
+  #preview {
+    width: 100%;
+    padding: 16px 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--surface);
+    display: none;
+    line-height: 1.8;
+    font-size: 15px;
+    position: absolute;
+    inset: 0;
+  }
+  #preview.active { display: block; }
+
+  /* プレビュー内の各要素スタイル */
+  #preview h3 { font-size: 1.2em; margin: 1em 0 0.5em; border: none; }
+  #preview h4 { font-size: 1.05em; margin: 0.8em 0 0.4em; }
+  #preview h5 { font-size: 0.95em; margin: 0.6em 0 0.3em; }
+  #preview p { margin: 1.5em 0; line-height: 1.8; }
+  #preview p.spacer { margin: 0.1em 0; line-height: 1.8; }
+  #preview blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    margin: 1.5em 0;
+    color: var(--text-mid);
+  }
+  #preview ul { padding-left: 1.5em; margin: 0.5em 0; }
+  #preview li { margin: 0.2em 0; }
+  #preview strong { font-weight: 700; }
+  #preview hr { border: none; border-top: 1px solid #999; margin: 0.6em 0; }
+  #preview pre {
+    background: #f5f5f5;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #preview code { font-family: monospace; font-size: 13px; }
+</style>
+
+<!-- プレビューHTML -->
+  <div class="preview-indicator" id="previewIndicator">
+    <span id="previewModeLabel">HTMLプレビュー</span>
+    <span style="margin-left:8px;font-weight:400;font-size:11px;opacity:0.7">（長押しでMD切替）</span>
+  </div>
+
+
+<!-- ══════════════ #EDITOR テキストエリア本体 ══════════════ -->
+<style>
+  .editor-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .editor-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #editor {
+    flex: 1;
+    width: 100%;
+    padding: 16px 14px;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    font-size: 15px;
+    line-height: 1.8;
+    color: var(--text);
+    background: var(--surface);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #editor::placeholder { color: var(--text-light); }
+</style>
+
+<!-- エディターHTML -->
+  <div class="editor-wrap">
+    <div class="editor-container">
+      <textarea id="editor" placeholder="…"></textarea>
+      <div id="preview"></div>
+    </div>
+  </div>
+
+
+<!-- ══════════════ #STATUS ステータスバー（文字数カウント・クリアボタン） ══════════════ -->
+<style>
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 12px;
+    background: var(--toolbar-bg);
+    border-top: 1px solid var(--border-light);
+    font-size: 11px;
+    color: var(--text-light);
+    min-height: 28px;
+  }
+  /* クリアボタン */
+  .btn-clear {
+    font-size: 11px;
+    padding: 2px 8px;
+    min-height: 22px;
+    color: var(--text-light);
+    border-color: var(--border-light);
+    background: transparent;
+  }
+  .btn-clear:hover, .btn-clear:active {
+    background: var(--btn-hover);
+    color: var(--danger);
+  }
+</style>
+
+<!-- ステータスバーHTML -->
+  <div class="status-bar">
+    <span id="charCount">0 文字</span>
+    <button class="btn btn-clear" id="btnClear">クリア</button>
+  </div>
+
+</div><!-- /.app -->
+
+
+<!-- ══════════════ #TOAST トースト通知 ══════════════ -->
+<style>
+  .toast {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+
+<!-- トーストHTML -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ══════════════ #LEAVE 離脱警告ダイアログ ══════════════ -->
+<style>
+  /* 離脱警告オーバーレイ（z-indexをhtmlModalより高くする） */
+  .leave-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .leave-overlay.active { display: flex; }
+  .leave-dialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .leave-dialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .leave-dialog-body {
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .leave-dialog-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .leave-btn-cancel {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .leave-btn-cancel:hover, .leave-btn-cancel:active {
+    background: var(--accent-hover);
+  }
+  .leave-btn-leave {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--border);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .leave-btn-leave:hover, .leave-btn-leave:active {
+    background: var(--btn-hover);
+  }
+</style>
+
+<!-- 離脱警告ダイアログHTML -->
+<div class="leave-overlay" id="leaveOverlay">
+  <div class="leave-dialog">
+    <div class="leave-dialog-title">ページを離れますか？</div>
+    <div class="leave-dialog-body">編集中の内容は保存されません。</div>
+    <div class="leave-dialog-btns">
+      <button class="btn leave-btn-cancel" id="btnLeaveCancel">編集を続ける</button>
+      <button class="btn leave-btn-leave" id="btnLeaveConfirm">このページを離れる</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════ -->
+<style>
+  /* メニューオーバーレイ（背景暗幕） */
+  .menu-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3000;
+  }
+  .menu-overlay.active { display: block; }
+
+  /* メニューパネル（左からスライド） */
+  .menu-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    max-width: 75vw;
+    background: var(--surface);
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .menu-panel.active { transform: translateX(0); }
+
+  /* メニューヘッダー */
+  .menu-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .menu-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+
+  /* メニュー項目 */
+  .menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 14px 16px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+  }
+  .menu-item:active { background: var(--btn-hover); }
+  .menu-item:disabled { opacity: 0.35; pointer-events: none; }
+
+  /* メニュー区切り線 */
+  .menu-sep {
+    height: 1px;
+    background: var(--border-light);
+    margin: 4px 0;
+  }
+
+  /* メニュー内セクションラベル */
+  .menu-label {
+    padding: 10px 16px 4px;
+    font-size: 11px;
+    color: var(--text-mid);
+    font-weight: 600;
+  }
+
+  /* 履歴アイテム */
+  .menu-history-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .menu-history-item:active { background: var(--btn-hover); }
+  .menu-history-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .menu-history-date {
+    font-size: 11px;
+    color: var(--text-mid);
+    margin-top: 2px;
+  }
+
+  /* ファイル名入力モーダル */
+  .namedialog-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 4000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .namedialog-overlay.active { display: flex; }
+  .namedialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .namedialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .namedialog-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
+  }
+  .namedialog-input:focus { border-color: var(--accent); }
+  .namedialog-btns {
+    display: flex;
+    gap: 8px;
+  }
+  .namedialog-btns .btn { flex: 1; min-height: 40px; font-size: 14px; }
+</style>
+
+<!-- メニューパネルHTML -->
+<div class="menu-overlay" id="menuOverlay"></div>
+<div class="menu-panel" id="menuPanel">
+  <div class="menu-header">
+    <span class="menu-header-title">PEG memo</span>
+  </div>
+  <button class="menu-item" id="menuNewDoc">新規文書</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" id="menuSave">上書き保存</button>
+  <button class="menu-item" id="menuSaveAs">別名保存</button>
+  <button class="menu-item" disabled>ダウンロード（準備中）</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" disabled>ライブラリ（準備中）</button>
+  <div class="menu-sep"></div>
+  <div class="menu-label">りれき</div>
+  <div id="menuHistory"></div>
+</div>
+
+<!-- ファイル名入力モーダルHTML -->
+<div class="namedialog-overlay" id="nameDialogOverlay">
+  <div class="namedialog">
+    <div class="namedialog-title" id="nameDialogTitle">ファイル名を入力</div>
+    <input type="text" class="namedialog-input" id="nameDialogInput" placeholder="ファイル名">
+    <div class="namedialog-btns">
+      <button class="btn" id="nameDialogCancel">キャンセル</button>
+      <button class="btn btn-accent" id="nameDialogOk">保存</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ #MODAL HTML出力モーダル ══════════════ -->
+<style>
+  /* モーダル背景オーバーレイ */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+
+  /* モーダル本体（下から出てくるシート） */
+  .modal {
+    background: var(--surface);
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 16px 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.25s ease-out;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .modal-header h3 { font-size: 15px; font-weight: 700; }
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .modal-body textarea {
+    width: 100%;
+    min-height: 200px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    background: #fafafa;
+    resize: none;
+  }
+  .modal-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-light);
+  }
+</style>
+
+<!-- モーダルHTML -->
+<div class="modal-overlay" id="htmlModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>HTML出力</h3>
+      <button class="btn btn-icon" id="btnCloseModal" style="border:none;font-size:20px;">✕</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="htmlOutput" readonly></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-accent" id="btnCopyHtml" style="flex:1;">HTMLをコピー</button>
+      <button class="btn" id="btnCloseModal2">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+
+// ══════════════ #STATE アプリ状態・DOM参照 ══════════════
+
+// アプリ全体の状態管理オブジェクト
+const App = {
+  currentDocId: null,   // 現在編集中の文書ID（null = 新規未保存）
+  currentDocName: '',   // 現在の文書名
+  previewMode: 'html',  // 'html' または 'md'
+  isPreview: false,
+  undoStack: [],
+  redoStack: [],
+  lastSavedState: '',
+  inputTimer: null,
+  saveTimer: null,
+};
+
+// DOM要素の参照をまとめて取得
+const $ = id => document.getElementById(id);
+const editor          = $('editor');
+const preview         = $('preview');
+const btnUndo         = $('btnUndo');
+const btnRedo         = $('btnRedo');
+const btnPreview      = $('btnPreview');
+const btnHtmlOutput   = $('btnHtmlOutput');
+const previewIndicator = $('previewIndicator');
+const previewModeLabel = $('previewModeLabel');
+const charCount       = $('charCount');
+const templateSelect  = $('templateSelect');
+const toast           = $('toast');
+const htmlModal       = $('htmlModal');
+const htmlOutput      = $('htmlOutput');
+
+
+// ══════════════ #TOAST トースト通知 ══════════════
+
+// トーストメッセージを一定時間表示する
+function showToast(msg, duration = 1500) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+
+// ══════════════ #DB IndexedDBライブラリ（文書の保存・読出・更新・削除） ══════════════
+
+const DB_NAME = 'pegmemo';
+const DB_VERSION = 1;
+let db = null;
+
+// データベースを開く（初回はオブジェクトストアを作成する）
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error('このブラウザはIndexedDBに対応していません'));
+      return;
+    }
+
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+    req.onupgradeneeded = (e) => {
+      const database = e.target.result;
+      if (!database.objectStoreNames.contains('docs')) {
+        const store = database.createObjectStore('docs', {
+          keyPath: 'id',
+          autoIncrement: true,
+        });
+        store.createIndex('name', 'name', { unique: false });
+        store.createIndex('folderId', 'folderId', { unique: false });
+        store.createIndex('createdAt', 'createdAt', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+    };
+
+    req.onsuccess = (e) => {
+      db = e.target.result;
+      resolve(db);
+    };
+
+    req.onerror = (e) => {
+      reject(e.target.error || new Error('DB open error'));
+    };
+
+    req.onblocked = () => {
+      reject(new Error('DBがブロックされています（他のタブを閉じてください）'));
+    };
+  });
+}
+
+// 新規文書を保存する → 保存した文書オブジェクト（id付き）を返す
+function saveNewDoc(name, content) {
+  return new Promise((resolve, reject) => {
+    const now = new Date();
+    const doc = {
+      name: name,
+      content: content,
+      folderId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const tx = db.transaction('docs', 'readwrite');
+    const store = tx.objectStore('docs');
+    const req = store.add(doc);
+    req.onsuccess = () => {
+      doc.id = req.result;
+      resolve(doc);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 既存文書を部分更新する（updatedAtは自動で現在時刻に更新）
+function updateDoc(id, changes) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('docs', 'readwrite');
+    const store = tx.objectStore('docs');
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const doc = getReq.result;
+      if (!doc) { reject(new Error('文書が見つかりません')); return; }
+      Object.assign(doc, changes, { updatedAt: new Date() });
+      const putReq = store.put(doc);
+      putReq.onsuccess = () => resolve(doc);
+      putReq.onerror = () => reject(putReq.error);
+    };
+    getReq.onerror = () => reject(getReq.error);
+  });
+}
+
+// 文書を1件取得する
+function getDoc(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('docs', 'readonly');
+    const store = tx.objectStore('docs');
+    const req = store.get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 全文書を取得する
+function getAllDocs() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('docs', 'readonly');
+    const store = tx.objectStore('docs');
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 文書を削除する
+function deleteDoc(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('docs', 'readwrite');
+    const store = tx.objectStore('docs');
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+
+// ══════════════ #STATUS ステータスバー（文字数カウント） ══════════════
+
+// HTMLタグと改行を除いた文字数を表示する
+function updateCharCount() {
+  const text = editor.value;
+  const stripped = text.replace(/<[^>]*>/g, '').replace(/\n/g, '');
+  charCount.textContent = stripped.length + ' 文字';
+}
+
+
+// ══════════════ #AUTOSAVE localStorage自動保存・復元 ══════════════
+
+const AUTOSAVE_KEY = 'pegmemo_autosave';
+
+// エディター内容をlocalStorageに保存する
+function autosave() {
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, editor.value);
+  } catch (e) {
+    // ストレージ容量超過などは無視
+  }
+}
+
+// localStorageから復元する（起動時に呼ぶ）
+function restoreAutosave() {
+  try {
+    const saved = localStorage.getItem(AUTOSAVE_KEY);
+    if (saved && saved.length > 0) {
+      editor.value = saved;
+      updateCharCount();
+      showToast('前回の内容を復元しました');
+    }
+  } catch (e) {
+    // 読み取りエラーは無視
+  }
+}
+
+// クリアボタン：エディターとlocalStorageを空にする
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (editor.value.length === 0) return;
+  const ok = window.confirm('編集中の内容をすべて削除しますか？');
+  if (!ok) return;
+  editor.value = '';
+  localStorage.removeItem(AUTOSAVE_KEY);
+  saveUndoState();
+  updateCharCount();
+  showToast('クリアしました');
+});
+
+
+// ══════════════ #UNDO Undo / Redo ══════════════
+
+// 現在のエディター状態をUndoスタックに保存する
+function saveUndoState() {
+  const state = {
+    text: editor.value,
+    start: editor.selectionStart,
+    end: editor.selectionEnd,
+  };
+  // 直前と同じ内容なら保存しない
+  if (App.undoStack.length > 0) {
+    const last = App.undoStack[App.undoStack.length - 1];
+    if (last.text === state.text) return;
+  }
+  App.undoStack.push(state);
+  if (App.undoStack.length > 200) App.undoStack.shift();
+  App.redoStack = [];
+  updateUndoButtons();
+}
+
+// 保存済みの状態をエディターに復元する
+function restoreState(state) {
+  editor.value = state.text;
+  editor.selectionStart = state.start;
+  editor.selectionEnd = state.end;
+  editor.focus();
+  updateCharCount();
+}
+
+// 一つ前の状態に戻す
+function undo() {
+  if (App.undoStack.length === 0) return;
+  const current = {
+    text: editor.value,
+    start: editor.selectionStart,
+    end: editor.selectionEnd,
+  };
+  App.redoStack.push(current);
+  const prev = App.undoStack.pop();
+  restoreState(prev);
+  updateUndoButtons();
+}
+
+// Undoした操作をやり直す
+function redo() {
+  if (App.redoStack.length === 0) return;
+  const current = {
+    text: editor.value,
+    start: editor.selectionStart,
+    end: editor.selectionEnd,
+  };
+  App.undoStack.push(current);
+  const next = App.redoStack.pop();
+  restoreState(next);
+  updateUndoButtons();
+}
+
+// Undo/Redoボタンの有効・無効を更新する
+function updateUndoButtons() {
+  btnUndo.disabled = App.undoStack.length === 0;
+  btnRedo.disabled = App.redoStack.length === 0;
+}
+
+// エディター入力後、500ms待ってからUndoスタックに保存（連続入力をまとめる）
+// あわせて2秒後にlocalStorageへ自動保存する
+editor.addEventListener('input', () => {
+  clearTimeout(App.inputTimer);
+  App.inputTimer = setTimeout(() => {
+    saveUndoState();
+  }, 500);
+  clearTimeout(App.saveTimer);
+  App.saveTimer = setTimeout(() => {
+    autosave();
+  }, 2000);
+  updateCharCount();
+});
+
+// ボタンクリックでUndo/Redo
+btnUndo.addEventListener('click', undo);
+btnRedo.addEventListener('click', redo);
+
+// キーボードショートカット Ctrl+Z / Ctrl+Shift+Z
+editor.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    if (e.shiftKey) {
+      redo();
+    } else {
+      undo();
+    }
+  }
+});
+
+
+// ══════════════ #TOOLBAR ツールバー（書式ボタン・罫線・テンプレ選択） ══════════════
+
+// カーソル位置またはテキスト選択範囲に文字列を挿入する
+function insertAtCursor(before, after = '') {
+  saveUndoState();
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const text = editor.value;
+  const selected = text.substring(start, end);
+
+  let insert;
+  if (selected) {
+    insert = before + selected + after;
+  } else {
+    insert = before + after;
+  }
+
+  editor.value = text.substring(0, start) + insert + text.substring(end);
+
+  // カーソル位置の調整
+  if (selected) {
+    editor.selectionStart = start;
+    editor.selectionEnd = start + insert.length;
+  } else {
+    const cursorPos = start + before.length;
+    editor.selectionStart = cursorPos;
+    editor.selectionEnd = cursorPos;
+  }
+
+  editor.focus();
+  saveUndoState();
+  updateCharCount();
+}
+
+// カーソル行の前後に改行を挿入して1行追加する
+function insertLine(line) {
+  saveUndoState();
+  const start = editor.selectionStart;
+  const text = editor.value;
+
+  let prefix = '';
+  if (start > 0 && text[start - 1] !== '\n') {
+    prefix = '\n';
+  }
+  let suffix = '\n';
+
+  editor.value = text.substring(0, start) + prefix + line + suffix + text.substring(start);
+
+  const newPos = start + prefix.length + line.length + suffix.length;
+  editor.selectionStart = newPos;
+  editor.selectionEnd = newPos;
+  editor.focus();
+  saveUndoState();
+  updateCharCount();
+}
+
+// 書式ボタン（H3・H4・B）のクリック処理
+document.getElementById('toolbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  switch (action) {
+    case 'h3':   insertAtCursor('<h3>◆', '</h3>'); break;
+    case 'h4':   insertAtCursor('<h4>◇', '</h4>'); break;
+  }
+});
+
+// 罫線セレクトの変更処理
+const hrSelect = $('hrSelect');
+hrSelect.addEventListener('change', () => {
+  const val = hrSelect.value;
+  if (!val) return;
+  switch (val) {
+    case 'hr':
+      insertLine('<hr>');
+      break;
+    case 'hr-light':
+      insertLine('<hr style="border: none; border-top: 1px solid #ccc; margin: 0.6em 0;">');
+      break;
+    case 'hr-xlight':
+      insertLine('<hr style="border: none; border-top: 1px solid #ddd; margin: 0.6em 0;">');
+      break;
+  }
+  hrSelect.value = '';
+});
+
+// ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════
+
+const menuOverlay     = $('menuOverlay');
+const menuPanel       = $('menuPanel');
+const menuHistory     = $('menuHistory');
+const nameDialogOverlay = $('nameDialogOverlay');
+const nameDialogInput   = $('nameDialogInput');
+const nameDialogTitle   = $('nameDialogTitle');
+
+// --- メニューの開閉 ---
+
+function openMenu() {
+  menuOverlay.classList.add('active');
+  menuPanel.classList.add('active');
+  loadMenuHistory();
+}
+
+function closeMenu() {
+  menuPanel.classList.remove('active');
+  menuOverlay.classList.remove('active');
+}
+
+$('btnHamburger').addEventListener('click', openMenu);
+menuOverlay.addEventListener('click', closeMenu);
+
+// --- ファイル名入力モーダル ---
+
+// Promiseで結果を返す（入力値 or null）
+function showNameDialog(title, defaultValue) {
+  return new Promise((resolve) => {
+    nameDialogTitle.textContent = title || 'ファイル名を入力';
+    nameDialogInput.value = defaultValue || '';
+    nameDialogOverlay.classList.add('active');
+    setTimeout(() => nameDialogInput.focus(), 100);
+
+    function cleanup() {
+      nameDialogOverlay.classList.remove('active');
+      $('nameDialogOk').removeEventListener('click', onOk);
+      $('nameDialogCancel').removeEventListener('click', onCancel);
+      nameDialogOverlay.removeEventListener('click', onBgClick);
+    }
+    function onOk() {
+      const val = nameDialogInput.value.trim();
+      cleanup();
+      resolve(val || null);
+    }
+    function onCancel() {
+      cleanup();
+      resolve(null);
+    }
+    function onBgClick(e) {
+      if (e.target === nameDialogOverlay) {
+        cleanup();
+        resolve(null);
+      }
+    }
+    $('nameDialogOk').addEventListener('click', onOk);
+    $('nameDialogCancel').addEventListener('click', onCancel);
+    nameDialogOverlay.addEventListener('click', onBgClick);
+
+    // Enterキーで確定
+    nameDialogInput.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); onOk(); }
+    };
+  });
+}
+
+// --- 上書き保存 ---
+
+async function doSave() {
+  if (!db) { showToast('DBが利用できません'); return; }
+  const content = editor.value;
+
+  if (App.currentDocId) {
+    // 上書き保存
+    try {
+      await updateDoc(App.currentDocId, { content: content });
+      autosave();
+      showToast('保存しました');
+    } catch (e) {
+      showToast('保存に失敗しました');
+      console.error('Save error:', e);
+    }
+  } else {
+    // まだ一度も保存していない → 別名保存と同じ動作
+    await doSaveAs();
+  }
+}
+
+// --- 別名保存 ---
+
+async function doSaveAs() {
+  if (!db) { showToast('DBが利用できません'); return; }
+  const defaultName = App.currentDocName || '';
+  const name = await showNameDialog('ファイル名を入力', defaultName);
+  if (!name) return;
+
+  const content = editor.value;
+  try {
+    const doc = await saveNewDoc(name, content);
+    App.currentDocId = doc.id;
+    App.currentDocName = doc.name;
+    autosave();
+    showToast('「' + doc.name + '」を保存しました');
+  } catch (e) {
+    showToast('保存に失敗しました');
+    console.error('Save error:', e);
+  }
+}
+
+// --- 新規文書 ---
+
+async function doNewDoc() {
+  // 現在の内容が空でなければ確認
+  if (editor.value.length > 0) {
+    const ok = window.confirm('現在の内容を破棄して新規文書を作成しますか？');
+    if (!ok) return;
+  }
+  editor.value = '';
+  App.currentDocId = null;
+  App.currentDocName = '';
+  App.undoStack = [];
+  App.redoStack = [];
+  updateUndoButtons();
+  updateCharCount();
+  autosave();
+  showToast('新規文書を作成しました');
+}
+
+// --- 履歴（最近使ったファイル5件） ---
+
+async function loadMenuHistory() {
+  menuHistory.innerHTML = '';
+  if (!db) return;
+
+  try {
+    const docs = await getAllDocs();
+
+    if (docs.length === 0) {
+      menuHistory.innerHTML = '<div style="padding:10px 16px;font-size:12px;color:var(--text-mid);">履歴はありません</div>';
+      return;
+    }
+
+    // updatedAtの新しい順にソートして最大5件
+    // Date型でない場合に備えてnew Date()で変換する
+    docs.sort((a, b) => {
+      const da = a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt);
+      const db2 = b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt);
+      return db2 - da;
+    });
+    const recent = docs.slice(0, 5);
+
+    recent.forEach(doc => {
+      const btn = document.createElement('button');
+      btn.className = 'menu-history-item';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'menu-history-name';
+      nameSpan.textContent = doc.name;
+
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'menu-history-date';
+      const d = doc.updatedAt instanceof Date ? doc.updatedAt : new Date(doc.updatedAt);
+      if (!isNaN(d.getTime())) {
+        dateSpan.textContent = d.getFullYear() + '/' +
+          String(d.getMonth() + 1).padStart(2, '0') + '/' +
+          String(d.getDate()).padStart(2, '0') + ' ' +
+          String(d.getHours()).padStart(2, '0') + ':' +
+          String(d.getMinutes()).padStart(2, '0');
+      } else {
+        dateSpan.textContent = '(日時不明)';
+      }
+
+      btn.appendChild(nameSpan);
+      btn.appendChild(dateSpan);
+
+      btn.addEventListener('click', () => openDocFromHistory(doc.id));
+      menuHistory.appendChild(btn);
+    });
+  } catch (e) {
+    showToast('履歴読込エラー: ' + e.message);
+    console.error('History load error:', e);
+  }
+}
+
+// 履歴から文書を開く
+async function openDocFromHistory(id) {
+  // 現在の内容が空でなければ確認
+  if (editor.value.length > 0) {
+    const ok = window.confirm('現在の内容を破棄してファイルを開きますか？');
+    if (!ok) return;
+  }
+
+  try {
+    const doc = await getDoc(id);
+    if (!doc) { showToast('文書が見つかりません'); return; }
+    editor.value = doc.content;
+    App.currentDocId = doc.id;
+    App.currentDocName = doc.name;
+    App.undoStack = [];
+    App.redoStack = [];
+    saveUndoState();
+    updateUndoButtons();
+    updateCharCount();
+    autosave();
+    closeMenu();
+    showToast('「' + doc.name + '」を開きました');
+  } catch (e) {
+    showToast('文書を開けませんでした');
+    console.error('Open doc error:', e);
+  }
+}
+
+// --- メニュー項目のイベント登録 ---
+
+$('menuSave').addEventListener('click', async () => {
+  closeMenu();
+  await doSave();
+});
+
+$('menuSaveAs').addEventListener('click', async () => {
+  closeMenu();
+  await doSaveAs();
+});
+
+$('menuNewDoc').addEventListener('click', async () => {
+  closeMenu();
+  await doNewDoc();
+});
+
+
+// ══════════════ #TEMPLATE テンプレート定義・挿入処理 ══════════════
+
+// 挿入可能なテンプレートの文字列定義
+const TEMPLATES = {
+  'top-anchor': `<p><a id="top"></a></p>`,
+
+  'title-template': `歌詞考察「◯◯◯」BUCK-TICK 櫻井敦司／長文エッセイ／解釈`,
+
+  'lead-disclaimer': `ここにリード文を入れる
+
+<div style="border: 1px solid #aaa; padding: 10px;">
+<p>※本記事は、筆者とChatGPTの会話によって導き出した、櫻井敦司さんの歌詞についての考察をブログ用に再構成したものです。<br>様々な解釈がある中での一つとしてお読みいただければ幸いです。<br>歌詞本文は著作権保護のため、必要最小限のみ引用しています。</p>
+</div>`,
+
+  'toc': `<div style="border: 1px solid #aaa; padding: 10px;">
+<p><span style="color: #000000;">「◯◯◯（曲名）」歌詞考察</span></p>
+<p>[:contents]</p>
+</div>`,
+
+  'end': `\n\nEND\n`,
+
+  'end-note1': `※以上は、歌詞の要素から導き出した「一つの解釈」として読んでいただければ幸いです。`,
+
+  'end-note2': `※本文中の歌詞引用
+<b>BUCK-TICK「◯◯◯」</b>
+<b>作詞：櫻井敦司［アルバム『◯◯◯』(20XX) 収録］</b>`,
+
+  'end-note3': `※本記事の無断転載・コピーはご遠慮ください。紹介や引用の際は、記事へのリンクを添えてください。`,
+
+  'footer1': `・筆者の考察方法についてはこちらをどうぞ↓
+<a href="https://peg-kousatsu-note.hateblo.jp/entry/2025/kousatsuprocess">【ChatGPTを使用した歌詞考察の方法について】</a>`,
+
+  'footer2': `・筆者の考察エッセイの作成方法についてはこちらです↓
+<a href="https://peg-kousatsu-note.hateblo.jp/entry/2025/writingprocess">【考察エッセイの作成プロセスについて（ChatGPT使用）】</a>`,
+
+  'top-button': `<!-- ===== ページトップボタン ===== -->
+<p><a href="#top" style="position: fixed; bottom: 20px; right: 20px; display: inline-block; padding: 10px 12px; background-color: rgba(238,238,238,0.7); color: #333; border-radius: 50%; text-decoration: none; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 1000; transition: background-color 0.2s;">▲</a></p>
+<style>
+  a[href="#top"]:hover {
+    background-color: rgba(238,238,238,0.95);
+  }
+</style>`,
+};
+
+// テンプレートセレクトの変更処理
+templateSelect.addEventListener('change', () => {
+  const key = templateSelect.value;
+  if (!key) return;
+  const tpl = TEMPLATES[key];
+  if (tpl) {
+    insertLine(tpl);
+    showToast('テンプレートを挿入しました');
+  }
+  templateSelect.value = '';
+});
+
+
+// ══════════════ #CONVERT テキスト → HTML変換エンジン ══════════════
+
+// エディターのテキストをブログ用HTMLに変換する（HTML出力ボタン用）
+function convertToHtml(text) {
+  const lines = text.split('\n');
+  const output = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // 空行：連続する空行の数を数えてスペーサーを挿入
+    if (trimmed === '') {
+      let emptyCount = 0;
+      while (i < lines.length && lines[i].trim() === '') {
+        emptyCount++;
+        i++;
+      }
+      // 2行以上の空行は余白として出力
+      if (emptyCount >= 2) {
+        for (let e = 0; e < emptyCount - 1; e++) {
+          output.push('<p class="spacer">&nbsp;</p>');
+        }
+      }
+      continue;
+    }
+
+    // HTMLブロック要素はそのまま通過させる
+    if (isHtmlBlock(trimmed)) {
+      const blockResult = collectHtmlBlock(lines, i);
+      output.push(blockResult.html);
+      i = blockResult.nextIndex;
+      continue;
+    }
+
+    // 罫線（---）
+    if (/^-{3,}$/.test(trimmed)) {
+      output.push('<hr>');
+      i++;
+      continue;
+    }
+
+    // リスト（- ）
+    if (trimmed.startsWith('- ')) {
+      const listItems = [];
+      while (i < lines.length && lines[i].trim().startsWith('- ')) {
+        listItems.push(convertInline(lines[i].trim().substring(2)));
+        i++;
+      }
+      output.push('<ul>');
+      listItems.forEach(item => output.push('<li>' + item + '</li>'));
+      output.push('</ul>');
+      continue;
+    }
+
+    // 引用（> ）
+    if (trimmed.startsWith('> ')) {
+      const quoteLines = [];
+      while (i < lines.length && lines[i].trim().startsWith('> ')) {
+        quoteLines.push(convertInline(lines[i].trim().substring(2)));
+        i++;
+      }
+      output.push('<blockquote>');
+      output.push('<p>' + quoteLines.join('<br>') + '</p>');
+      output.push('</blockquote>');
+      continue;
+    }
+
+    // 通常テキスト：連続する行をまとめて<p>にする
+    const paraLines = [];
+    while (i < lines.length) {
+      const cl = lines[i];
+      const ct = cl.trim();
+      if (ct === '' || isHtmlBlock(ct) || ct.startsWith('- ') || ct.startsWith('> ') || /^-{3,}$/.test(ct)) {
+        break;
+      }
+      paraLines.push(convertInline(ct));
+      i++;
+    }
+    if (paraLines.length > 0) {
+      output.push('<p>' + paraLines.join('<br>') + '</p>');
+    }
+  }
+
+  return output.join('\n');
+}
+
+// ブロックレベルHTMLタグかどうかを判定する
+function isHtmlBlock(line) {
+  const blockStarts = [
+    '<h3', '<h4', '<h5', '<h6', '<hr', '<div', '</div', '<ul', '</ul',
+    '<ol', '</ol', '<li', '<blockquote', '</blockquote', '<table',
+    '<p><a id=', '<p><a href=', '<style', '</style', '<!--',
+    '<p><span', '<a href='
+  ];
+  const lower = line.toLowerCase();
+  return blockStarts.some(tag => lower.startsWith(tag));
+}
+
+// 複数行にまたがるHTMLブロックを収集して返す
+function collectHtmlBlock(lines, startIndex) {
+  const line = lines[startIndex].trim();
+  const lower = line.toLowerCase();
+
+  // 1行完結のHTMLブロック（<hr>、1行コメント）
+  if (lower.startsWith('<hr') || lower.startsWith('<!--') && line.includes('-->')) {
+    return { html: line, nextIndex: startIndex + 1 };
+  }
+
+  // 複数行ブロック：<div>、<style>
+  const multiLineTags = ['div', 'style'];
+  for (const tag of multiLineTags) {
+    if (lower.startsWith('<' + tag)) {
+      const collected = [line];
+      let j = startIndex + 1;
+      const closeTag = '</' + tag + '>';
+      if (line.toLowerCase().includes(closeTag)) {
+        return { html: line, nextIndex: startIndex + 1 };
+      }
+      while (j < lines.length) {
+        collected.push(lines[j]);
+        if (lines[j].toLowerCase().includes(closeTag)) {
+          return { html: collected.join('\n'), nextIndex: j + 1 };
+        }
+        j++;
+      }
+      return { html: collected.join('\n'), nextIndex: j };
+    }
+  }
+
+  // 複数行コメント
+  if (lower.startsWith('<!--')) {
+    const collected = [line];
+    let j = startIndex + 1;
+    if (line.includes('-->')) {
+      return { html: line, nextIndex: startIndex + 1 };
+    }
+    while (j < lines.length) {
+      collected.push(lines[j]);
+      if (lines[j].includes('-->')) {
+        return { html: collected.join('\n'), nextIndex: j + 1 };
+      }
+      j++;
+    }
+    return { html: collected.join('\n'), nextIndex: j };
+  }
+
+  // デフォルト：1行として返す
+  return { html: line, nextIndex: startIndex + 1 };
+}
+
+// インライン記法を変換する（**bold** → <strong>）
+function convertInline(text) {
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return text;
+}
+
+
+// ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════
+
+let previewLongPressTimer = null;
+
+// クリックでプレビューの開閉
+btnPreview.addEventListener('click', () => {
+  if (App.isPreview) {
+    closePreview();
+  } else {
+    openPreview();
+  }
+});
+
+// 長押しでHTML/MDプレビューモードを切り替える
+btnPreview.addEventListener('touchstart', (e) => {
+  previewLongPressTimer = setTimeout(() => {
+    previewLongPressTimer = 'fired';
+    togglePreviewMode();
+  }, 500);
+}, { passive: true });
+
+btnPreview.addEventListener('touchend', () => {
+  if (previewLongPressTimer === 'fired') {
+    previewLongPressTimer = null;
+    return;
+  }
+  clearTimeout(previewLongPressTimer);
+  previewLongPressTimer = null;
+});
+
+btnPreview.addEventListener('touchcancel', () => {
+  clearTimeout(previewLongPressTimer);
+  previewLongPressTimer = null;
+});
+
+// HTML/MDプレビューモードをトグルする
+function togglePreviewMode() {
+  App.previewMode = App.previewMode === 'html' ? 'md' : 'html';
+  const label = App.previewMode === 'html' ? 'HTMLプレビュー' : 'MDプレビュー';
+  previewModeLabel.textContent = label;
+  showToast(label + 'に切替');
+  if (App.isPreview) {
+    renderPreview();
+  }
+}
+
+// プレビューを開く
+function openPreview() {
+  App.isPreview = true;
+  renderPreview();
+  editor.style.display = 'none';
+  preview.classList.add('active');
+  previewIndicator.classList.add('active');
+  btnPreview.textContent = '編集に戻る';
+  document.getElementById('toolbar').style.display = 'none';
+  // 戻るボタンでプレビューを閉じられるよう履歴を1件積む
+  history.pushState({ preview: true }, '');
+}
+
+// プレビューを閉じてエディターに戻る
+function closePreview() {
+  App.isPreview = false;
+  editor.style.display = '';
+  preview.classList.remove('active');
+  previewIndicator.classList.remove('active');
+  btnPreview.textContent = 'プレビュー';
+  document.getElementById('toolbar').style.display = '';
+  // editor.focus() は呼ばない → キーボード自動表示を防ぐ
+}
+
+// 現在のモードに応じてプレビューを描画する
+function renderPreview() {
+  const text = editor.value;
+  if (App.previewMode === 'html') {
+    const html = convertToHtml(text);
+    preview.innerHTML = html;
+  } else {
+    const mdHtml = renderMarkdownPreview(text);
+    preview.innerHTML = mdHtml;
+  }
+}
+
+// MDプレビュー：マークダウンをレンダリングし、HTMLタグはコードとして表示する
+function renderMarkdownPreview(text) {
+  const lines = text.split('\n');
+  const output = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // 空行：2行以上連続したらスペーサーを表示
+    if (trimmed === '') {
+      let emptyCount = 0;
+      while (i < lines.length && lines[i].trim() === '') {
+        emptyCount++;
+        i++;
+      }
+      i--; // forループのi++と合わせるため
+      if (emptyCount >= 2) {
+        for (let e = 0; e < emptyCount - 1; e++) {
+          output.push('<p class="spacer">&nbsp;</p>');
+        }
+      }
+      continue;
+    }
+
+    // HTMLタグはコードとして表示する
+    if (trimmed.startsWith('<')) {
+      output.push('<pre><code>' + escapeHtml(trimmed) + '</code></pre>');
+      continue;
+    }
+
+    // マークダウン見出し
+    if (trimmed.startsWith('### ')) {
+      output.push('<h3>' + convertInlineForMd(trimmed.substring(4)) + '</h3>');
+      continue;
+    }
+    if (trimmed.startsWith('## ')) {
+      output.push('<h3>' + convertInlineForMd(trimmed.substring(3)) + '</h3>');
+      continue;
+    }
+
+    // 罫線（---）
+    if (/^-{3,}$/.test(trimmed)) {
+      output.push('<hr>');
+      continue;
+    }
+
+    // リスト
+    if (trimmed.startsWith('- ')) {
+      const items = [];
+      while (i < lines.length && lines[i].trim().startsWith('- ')) {
+        items.push(convertInlineForMd(lines[i].trim().substring(2)));
+        i++;
+      }
+      i--;
+      output.push('<ul>' + items.map(it => '<li>' + it + '</li>').join('') + '</ul>');
+      continue;
+    }
+
+    // 引用
+    if (trimmed.startsWith('> ')) {
+      output.push('<blockquote><p>' + convertInlineForMd(trimmed.substring(2)) + '</p></blockquote>');
+      continue;
+    }
+
+    // 通常テキスト：連続する行をまとめて<p>にする
+    const paraLines = [];
+    while (i < lines.length) {
+      const ct = lines[i].trim();
+      if (ct === '' || ct.startsWith('<') || ct.startsWith('- ') || ct.startsWith('> ') || ct.startsWith('## ') || ct.startsWith('### ') || /^-{3,}$/.test(ct)) break;
+      paraLines.push(convertInlineForMd(ct));
+      i++;
+    }
+    i--; // forループのi++と合わせるため
+    if (paraLines.length > 0) {
+      output.push('<p>' + paraLines.join('<br>') + '</p>');
+    }
+  }
+
+  return output.join('\n');
+}
+
+// MDプレビュー用インライン変換（HTMLエスケープ後にboldを処理）
+function convertInlineForMd(text) {
+  text = escapeHtml(text);
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return text;
+}
+
+// HTMLの特殊文字をエスケープする
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+
+// ══════════════ #MODAL HTML出力モーダル ══════════════
+
+// HTML出力ボタン：変換結果をモーダルに表示する
+btnHtmlOutput.addEventListener('click', () => {
+  const html = convertToHtml(editor.value);
+  htmlOutput.value = html;
+  htmlModal.classList.add('active');
+  // テキストエリアの高さを内容に合わせて調整
+  setTimeout(() => {
+    htmlOutput.style.height = 'auto';
+    htmlOutput.style.height = Math.min(htmlOutput.scrollHeight, 400) + 'px';
+  }, 50);
+});
+
+// HTMLコピーボタン
+$('btnCopyHtml').addEventListener('click', () => {
+  const html = htmlOutput.value;
+  navigator.clipboard.writeText(html).then(() => {
+    showToast('HTMLをコピーしました');
+  }).catch(() => {
+    // Clipboard APIが使えない場合のフォールバック
+    htmlOutput.select();
+    document.execCommand('copy');
+    showToast('HTMLをコピーしました');
+  });
+});
+
+// モーダルを閉じる（×ボタン・閉じるボタン・背景タップ）
+$('btnCloseModal').addEventListener('click', () => htmlModal.classList.remove('active'));
+$('btnCloseModal2').addEventListener('click', () => htmlModal.classList.remove('active'));
+htmlModal.addEventListener('click', (e) => {
+  if (e.target === htmlModal) htmlModal.classList.remove('active');
+});
+
+
+// ══════════════ #INIT 初期化 ══════════════
+
+// visualViewport の高さに .app を追従させる
+// → スマホキーボード表示時にヘッダー・ツールバーが画面外に押し出されるのを防ぐ
+function setupViewportFix() {
+  if (!window.visualViewport) return;
+  const app = document.querySelector('.app');
+  const onResize = () => {
+    app.style.height = window.visualViewport.height + 'px';
+  };
+  window.visualViewport.addEventListener('resize', onResize);
+  onResize(); // 初回適用
+}
+
+// スマホ戻るボタンの処理をセットアップする
+// ・プレビュー中 → closePreview()
+// ・エディタ画面 → 自前の警告ダイアログを表示し、離脱かキャンセルかを選ばせる
+function setupBackButton() {
+  // ページ読み込み時点でエディタ用の履歴エントリを1件積んでおく
+  // これがないと最初の戻るボタンで即タブが閉じる
+  history.replaceState({ editor: true }, '');
+
+  const leaveOverlay = document.getElementById('leaveOverlay');
+  const btnLeaveCancel  = document.getElementById('btnLeaveCancel');
+  const btnLeaveConfirm = document.getElementById('btnLeaveConfirm');
+
+  // 離脱警告ダイアログを閉じてキャンセル（履歴を再追加してページ維持）
+  function cancelLeave() {
+    leaveOverlay.classList.remove('active');
+    history.pushState({ editor: true }, '');
+  }
+
+  // 離脱を確定（ダイアログを閉じて何もしない → ブラウザが前ページに戻る）
+  function confirmLeave() {
+    leaveOverlay.classList.remove('active');
+    // 履歴を再追加しないのでブラウザがそのまま戻る
+    history.back();
+  }
+
+  btnLeaveCancel.addEventListener('click', cancelLeave);
+  btnLeaveConfirm.addEventListener('click', confirmLeave);
+
+  // オーバーレイ背景タップでもキャンセル
+  leaveOverlay.addEventListener('click', (e) => {
+    if (e.target === leaveOverlay) cancelLeave();
+  });
+
+  window.addEventListener('popstate', (e) => {
+    if (App.isPreview) {
+      // プレビュー中 → エディタに戻るだけ
+      closePreview();
+    } else {
+      // エディタ画面 → 自前ダイアログを表示し、履歴を即再追加して離脱を一時保留
+      history.pushState({ editor: true }, '');
+      leaveOverlay.classList.add('active');
+    }
+  });
+}
+
+async function init() {
+  // IndexedDBを開く
+  try {
+    await openDB();
+  } catch (e) {
+    showToast('DB初期化失敗: ' + (e.message || e), 5000);
+    console.error('DB init error:', e);
+  }
+  restoreAutosave(); // 前回の内容をlocalStorageから復元
+  saveUndoState();   // 初期状態をUndoスタックに積む
+  updateCharCount(); // 文字数の初期表示
+  setupViewportFix(); // キーボード表示時のレイアウト崩れを防ぐ
+  setupBackButton();  // スマホ戻るボタンのハンドリング
+}
+
+init();
+
+</script>
+</body>
+</html>
