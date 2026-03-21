@@ -1,0 +1,4668 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: dark)">
+<title>PEG memo</title>
+<link rel="manifest" href="/pegmemo/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="/pegmemo/icon-192.png">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/pegmemo/sw.js');
+  }
+</script>
+
+<!--
+  ================================================================
+  PEGmemo  機能索引
+  各ワードでコード内検索するとその機能の先頭に飛べます
+
+  #BASE          CSS変数・リセット・レイアウト基盤
+  #HEADER        ヘッダーバー（ファイル名・Undo/Redo）
+  #TOOLBAR       ツールバー（書式ボタン・罫線・テンプレ選択・文字数）
+  #PREVIEW       プレビュー表示（HTML/MD切り替え）
+  #EDITOR        テキストエリア本体
+  #TOAST         トースト通知
+  #LEAVE         離脱警告ダイアログ
+  #CLOSETAB      未保存タブ閉じ確認ダイアログ
+  #MENU          ハンバーガーメニュー（保存・新規・履歴）
+  #LIBRARY       ライブラリパネル（全文書一覧・フォルダ・ソート）
+  #TABPANEL      タブパネル（右スライド・タブ切替・タブ閉じ）
+  #MODAL         HTML出力モーダル・タブ名編集モーダル
+  #CUSTOMTPL     カスタムテンプレート
+  #STATE         アプリ状態・DOM参照
+  #DB            IndexedDBライブラリ（文書の保存・読出・更新・削除）
+  #TAB           タブ管理（作成・切替・削除）
+  #STATUS        文字数カウント
+  #AUTOSAVE      localStorage自動保存・復元
+  #UNDO          Undo / Redo
+  #SWIPE         スワイプでメニュー・タブパネル開閉
+  #TEMPLATE      テンプレート定義・挿入処理
+  #CONVERT       テキスト → HTML変換エンジン
+  #INIT          初期化
+  ================================================================
+-->
+
+
+<!-- ══════════════ #BASE CSS変数・リセット・レイアウト基盤 ══════════════ -->
+<style>
+  /* カラーパレット（CSS変数） */
+  :root {
+    --bg: #faf9f7;
+    --surface: #ffffff;
+    --border: #e0ddd8;
+    --border-light: #eae7e2;
+    --text: #2c2c2c;
+    --text-mid: #666;
+    --text-light: #4a4a4a;
+    --accent: #B982BD;
+    --accent-hover: #AE79BA;
+    --accent-light: #ECDAED;
+    --toolbar-bg: #F7EDF6;
+    --btn-bg: #EFCBF7;
+    --btn-hover: #E9E1EB;
+    --danger: #c45;
+  }
+
+  /* リセット */
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  /* ベースレイアウト */
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+    overscroll-behavior: none;       /* ← 追加：オーバースクロール抑止 */
+  }
+
+  /* アプリ全体の縦並びレイアウト */
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;       /* ← 追加 */
+  }
+
+  /* 共通ボタン */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    min-height: 34px;
+    transition: background 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .btn:hover, .btn:active { background: var(--btn-hover); }
+  .btn:disabled { opacity: 0.35; pointer-events: none; }
+
+  /* アクセントカラーボタン */
+  .btn-accent {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-accent:hover, .btn-accent:active { background: var(--accent-hover); }
+
+  /* アイコンボタン（正方形） */
+  .btn-icon {
+    padding: 6px 8px;
+    font-size: 16px;
+    min-width: 34px;
+  }
+</style>
+
+
+<!-- ══════════════ #HEADER ヘッダーバー（ファイル名・Undo/Redo） ══════════════ -->
+<style>
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    min-height: 44px;
+    gap: 6px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  /* ファイル名表示 */
+  .doc-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+  .doc-name:active {
+    background: var(--btn-hover);
+  }
+  .doc-name.untitled {
+    color: var(--text-mid);
+  }
+  /* Undo/Redoボタン */
+  .btn-undo-redo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .btn-undo-redo:active { background: var(--btn-hover); }
+  .btn-undo-redo:disabled { opacity: 0.35; }
+  .btn-undo-redo svg {
+    width: 20px;
+    height: 20px;
+    stroke: var(--text);
+    fill: none;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* タブ数バッジ */
+  .tab-count-badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-mid);
+    min-width: 20px;
+    height: 20px;
+    text-align: center;
+    flex-shrink: 0;
+    padding: 3px 4px 0 4px;
+    border: 1.5px solid #F0D8E7;
+    border-radius: 10px;
+    background: #F7EDF6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    align-self: center;
+  }
+  /* プレビュー・HTML出力ボタン */
+  .btn-header-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .btn-header-action:active { background: var(--btn-hover); }
+  .btn-header-action.btn-accent {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .btn-header-action.btn-accent:active { opacity: 0.8; }
+  .btn-header-action svg {
+    width: 28px;
+    height: 20px;
+    stroke: var(--text);
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .btn-header-action.btn-accent svg {
+    stroke: #fff;
+  }
+</style>
+
+<!-- ヘッダーHTML -->
+<body>
+<div class="app">
+  <div class="header">
+    <div class="header-left">
+      <!-- Undo -->
+      <button class="btn-undo-redo" id="btnUndo" title="元に戻す" disabled>
+        <svg viewBox="0 0 24 24">
+          <path d="M9 14 4 9l5-5"/>
+          <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>
+        </svg>
+      </button>
+      <!-- Redo -->
+      <button class="btn-undo-redo" id="btnRedo" title="やり直し" disabled>
+        <svg viewBox="0 0 24 24">
+          <path d="m15 14 5-5-5-5"/>
+          <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>
+        </svg>
+      </button>
+      <!-- タブ数 -->
+      <span class="tab-count-badge" id="tabCountBadge">1</span>
+      <span class="doc-name untitled" id="docNameDisplay" title="タップしてファイル名を編集">無題</span>
+    </div>
+    <div class="header-right">
+      <!-- プレビュー -->
+      <button class="btn-header-action" id="btnPreview" title="プレビュー">▶</button>
+        <!-- HTML出力 -->
+      <button class="btn-header-action btn-accent" id="btnHtmlOutput" title="HTML出力">
+        <svg viewBox="0 0 24 24" preserveAspectRatio="none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+   <polyline points="17,18 22,12 17,6"/>
+  <polyline points="7,6 2,12 7,18"/>
+  <line x1="13.5" y1="4" x2="10.5" y2="20"/>
+</svg>
+      </button>
+    </div>
+  </div>
+
+
+<!-- ══════════════ #TOOLBAR ツールバー（書式ボタン・罫線・テンプレ選択・文字数） ══════════════ -->
+<style>
+  .toolbar {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    gap: 4px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border-light);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .toolbar .btn {
+    font-size: 12px;
+    padding: 5px 10px;
+    min-height: 30px;
+    border-color: var(--border-light);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .toolbar .btn:hover, .toolbar .btn:active {
+    background: var(--btn-hover);
+  }
+  /* ツールバー内の区切り線 */
+  .toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    flex-shrink: 0;
+    margin: 0 2px;
+  }
+  /* ツールバー内セレクトボックス（罫線・テンプレ共通） */
+  .template-select {
+    font-size: 12px;
+    font-family: inherit;
+    padding: 5px 6px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    min-height: 30px;
+    flex-shrink: 0;
+  }
+  /* 罫線・テンプレ・カスタム ボタン幅を統一 */
+  #hrBtn, #templateBtn, #btnCustomTpl {
+    width: 68px;
+  }
+  /* ツールバー右端の文字数表示 */
+  .toolbar-spacer { flex: 1; }
+  .toolbar-charcount {
+    font-size: 11px;
+    color: var(--text-mid);
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+/* テンプレポップアップ */
+  .tpl-popup {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    z-index: 1000;
+    min-width: 180px;
+    max-height: 60vh;
+    overflow-y: auto;
+    display: none;
+  }
+  .tpl-popup.open { display: block; }
+  .tpl-popup-item {
+    padding: 11px 16px;
+    font-size: 14px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+  }
+  .tpl-popup-item:last-child { border-bottom: none; }
+  .tpl-popup-item:active { background: var(--btn-hover); }
+</style>
+
+<!-- ツールバーHTML -->
+  <div class="toolbar" id="toolbar">
+    <button class="btn" data-action="h3">H3</button>
+    <button class="btn" data-action="h4">H4</button>
+    <div class="toolbar-sep"></div>
+    <button class="btn" id="hrBtn">罫線</button>
+    <div class="tpl-popup" id="hrPopup">
+      <div class="tpl-popup-item" data-hr="hr">罫線（通常）</div>
+      <div class="tpl-popup-item" data-hr="hr-light">罫線（薄）</div>
+      <div class="tpl-popup-item" data-hr="hr-xlight">罫線（極薄）</div>
+    </div>
+    <div class="toolbar-sep"></div>
+    <button class="btn template-select" id="templateBtn">テンプレ</button>
+    <div class="tpl-popup" id="tplPopup">
+      <div class="tpl-popup-item" data-tpl="font-style">フォントスタイル</div>
+      <div class="tpl-popup-item" data-tpl="top-anchor">ページトップアンカー</div>
+      <div class="tpl-popup-item" data-tpl="title-template">タイトルテンプレ</div>
+      <div class="tpl-popup-item" data-tpl="lead-disclaimer">リード文＋免責文</div>
+      <div class="tpl-popup-item" data-tpl="toc">目次ボックス</div>
+      <div class="tpl-popup-item" data-tpl="end">END</div>
+      <div class="tpl-popup-item" data-tpl="end-note1">END下①：解釈について</div>
+      <div class="tpl-popup-item" data-tpl="end-note2">END下②：歌詞引用</div>
+      <div class="tpl-popup-item" data-tpl="end-note3">END下③：転載禁止</div>
+      <div class="tpl-popup-item" data-tpl="footer1">末尾①：考察方法リンク</div>
+      <div class="tpl-popup-item" data-tpl="footer2">末尾②：作成プロセスリンク</div>
+      <div class="tpl-popup-item" data-tpl="top-button">ページトップボタン</div>
+    </div>
+    <div class="toolbar-sep"></div>
+    <button class="btn" id="btnCustomTpl" title="カスタムテンプレート">カスタム</button>
+    <div class="toolbar-spacer"></div>
+    <span class="toolbar-charcount" id="charCount">0 文字</span>
+  </div>
+
+
+<!-- ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════ -->
+<style>
+  /* プレビューモード中のインジケーター帯 */
+  .preview-indicator {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 12px;
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .preview-indicator.active { display: flex; }
+
+  /* プレビュー本体 */
+  #preview {
+    width: 100%;
+    padding: 16px 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--surface);
+    display: none;
+    line-height: 1.8;
+    font-size: 15px;
+    position: absolute;
+    inset: 0;
+  }
+  #preview.active { display: block; }
+
+  /* プレビュー内の各要素スタイル */
+  #preview h3 { font-size: 1.2em; margin: 1em 0 0.5em; border: none; }
+  #preview h4 { font-size: 1.05em; margin: 0.8em 0 0.4em; }
+  #preview h5 { font-size: 0.95em; margin: 0.6em 0 0.3em; }
+  #preview p { margin: 0; padding: 0.75em 0; line-height: 1.8; min-height: 1lh; display: block; }
+  #preview p.spacer { margin: 0.1em 0; line-height: 1.8; }
+  #preview blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    margin: 1.5em 0;
+    color: var(--text-mid);
+  }
+  #preview ul { padding-left: 1.5em; margin: 0.5em 0; }
+  #preview li { margin: 0.2em 0; }
+  #preview strong { font-weight: 700; }
+  #preview hr { border: none; border-top: 1px solid #999; margin: 0.6em 0; }
+  #preview pre {
+    background: #f5f5f5;
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #preview code { font-family: monospace; font-size: 13px; }
+</style>
+
+<!-- プレビューHTML -->
+  <div class="preview-indicator" id="previewIndicator">
+    <span id="previewModeLabel">HTMLプレビュー</span>
+    <span style="margin-left:8px;font-weight:400;font-size:11px;opacity:0.7">（長押しでMD切替）</span>
+  </div>
+
+
+<!-- ══════════════ #EDITOR テキストエリア本体 ══════════════ -->
+<style>
+  .editor-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .editor-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+  }
+  #editor {
+    flex: 1;
+    width: 100%;
+    padding: 16px 14px;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+    font-size: 15px;
+    line-height: 1.8;
+    color: var(--text);
+    background: var(--surface);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;    /* ← 追加：スクロール連鎖を遮断 */
+  }
+  #editor::placeholder { color: var(--text-light); }
+</style>
+
+<!-- エディターHTML -->
+  <div class="editor-wrap">
+    <div class="editor-container">
+      <textarea id="editor" placeholder="…"></textarea>
+      <div id="preview"></div>
+    </div>
+  </div>
+
+</div><!-- /.app -->
+
+
+<!-- ══════════════ #TOAST トースト通知 ══════════════ -->
+<style>
+  .toast {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.8);
+    color: #fff;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 13px;
+    z-index: 9999;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: 90vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .toast.show { opacity: 1; }
+</style>
+
+<!-- トーストHTML -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ══════════════ #LEAVE 離脱警告ダイアログ ══════════════ -->
+<style>
+  .leave-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .leave-overlay.active { display: flex; }
+  .leave-dialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .leave-dialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .leave-dialog-body {
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .leave-dialog-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .leave-btn-cancel {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .leave-btn-cancel:hover, .leave-btn-cancel:active {
+    background: var(--accent-hover);
+  }
+  .leave-btn-leave {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--border);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .leave-btn-leave:hover, .leave-btn-leave:active {
+    background: var(--btn-hover);
+  }
+</style>
+
+<!-- 離脱警告ダイアログHTML -->
+<div class="leave-overlay" id="leaveOverlay">
+  <div class="leave-dialog">
+    <div class="leave-dialog-title">ページを離れますか？</div>
+    <div class="leave-dialog-body">編集中の内容は保存されません。</div>
+    <div class="leave-dialog-btns">
+      <button class="btn leave-btn-cancel" id="btnLeaveCancel">編集を続ける</button>
+      <button class="btn leave-btn-leave" id="btnLeaveConfirm">このページを離れる</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ #CLOSETAB 未保存タブ閉じ確認ダイアログ ══════════════ -->
+<style>
+  .closetab-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 5000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .closetab-overlay.active { display: flex; }
+  .closetab-dialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .closetab-dialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .closetab-dialog-body {
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .closetab-dialog-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .closetab-btn-cancel {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .closetab-btn-cancel:hover, .closetab-btn-cancel:active {
+    background: var(--accent-hover);
+  }
+  .closetab-btn-save {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .closetab-btn-save:hover, .closetab-btn-save:active {
+    background: var(--btn-hover);
+  }
+  .closetab-btn-close {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--border);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .closetab-btn-close:hover, .closetab-btn-close:active {
+    background: var(--btn-hover);
+  }
+</style>
+
+<!-- 未保存タブ閉じ確認ダイアログHTML -->
+<div class="closetab-overlay" id="closeTabOverlay">
+  <div class="closetab-dialog">
+    <div class="closetab-dialog-title">保存せずに閉じますか？</div>
+    <div class="closetab-dialog-body">このタブには未保存の内容があります。<br>閉じると内容は失われます。</div>
+    <div class="closetab-dialog-btns">
+      <button class="btn closetab-btn-cancel" id="btnCloseTabCancel">編集を続ける</button>
+      <button class="btn closetab-btn-save" id="btnCloseTabSave">上書き保存して閉じる</button>
+      <button class="btn closetab-btn-close" id="btnCloseTabConfirm">保存せずに閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════ -->
+<style>
+  .menu-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3000;
+  }
+  .menu-overlay.active { display: block; }
+
+  .menu-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    max-width: 75vw;
+    background: var(--surface);
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .menu-panel.active { transform: translateX(0); }
+
+  .menu-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .menu-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 14px 16px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+  }
+  .menu-item:active { background: var(--btn-hover); }
+  .menu-item:disabled { opacity: 0.35; pointer-events: none; }
+
+  .menu-sep {
+    height: 1px;
+    background: var(--border-light);
+    margin: 4px 0;
+  }
+
+  .menu-label {
+    padding: 10px 16px 4px;
+    font-size: 11px;
+    color: var(--text-mid);
+    font-weight: 600;
+  }
+
+  .menu-history-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .menu-history-item:active { background: var(--btn-hover); }
+  .menu-history-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .menu-history-date {
+    font-size: 11px;
+    color: var(--text-mid);
+    margin-top: 2px;
+  }
+
+  .namedialog-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 4000;
+    align-items: flex-start;       /* ← 変更：上揃えに */
+    justify-content: center;
+    padding: 24px;
+    padding-top: 50%;              /* ← 変更：rename-overlayと同じ方式 */
+  }
+  .namedialog-overlay.active { display: flex; }
+  .namedialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .namedialog-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .namedialog-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
+  }
+  .namedialog-input:focus { border-color: var(--accent); }
+  .namedialog-btns {
+    display: flex;
+    gap: 8px;
+  }
+  .namedialog-btns .btn { flex: 1; min-height: 40px; font-size: 14px; }
+</style>
+
+<!-- メニューパネルHTML -->
+<div class="menu-overlay" id="menuOverlay"></div>
+<div class="menu-panel" id="menuPanel">
+  <div class="menu-header">
+    <span class="menu-header-title">PEG memo</span>
+  </div>
+  <button class="menu-item" id="menuNewDoc">新規文書</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" id="menuSave">上書き保存</button>
+  <button class="menu-item" id="menuSaveAs">別名保存</button>
+  <button class="menu-item" disabled>ダウンロード（準備中）</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" id="menuLibrary">ライブラリ</button>
+  <div class="menu-sep"></div>
+  <div class="menu-label">履歴</div>
+  <div id="menuHistory"></div>
+</div>
+
+<!-- ファイル名入力モーダルHTML -->
+<div class="namedialog-overlay" id="nameDialogOverlay">
+  <div class="namedialog">
+    <div class="namedialog-title" id="nameDialogTitle">ファイル名を入力</div>
+    <input type="text" class="namedialog-input" id="nameDialogInput" placeholder="ファイル名">
+    <div class="namedialog-btns">
+      <button class="btn" id="nameDialogCancel">キャンセル</button>
+      <button class="btn btn-accent" id="nameDialogOk">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ #LIBRARY ライブラリパネル（全文書一覧・フォルダ・ソート） ══════════════ -->
+<style>
+  .library-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3000;
+  }
+  .library-overlay.active { display: block; }
+
+  .library-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    background: var(--surface);
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out;
+  }
+  .library-panel.active { transform: translateX(0); }
+
+  .library-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
+  }
+  .library-header-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+
+  /* ソートボタン行 */
+  .library-sort-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .library-sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    color: var(--text-mid);
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    min-height: 28px;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .library-sort-btn:active { background: var(--btn-hover); }
+  .library-sort-btn.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .library-sort-arrow {
+    font-size: 10px;
+    opacity: 0.8;
+  }
+
+  /* 文書件数 */
+  .library-count {
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    color: var(--text-mid);
+    flex-shrink: 0;
+  }
+
+  /* 文書リスト */
+  .library-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .library-doc-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    gap: 3px;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .library-doc-item:active { background: var(--btn-hover); }
+  .library-doc-item.open-tab { background: var(--accent-light); }
+
+  .library-doc-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+  }
+  .library-doc-item.open-tab .library-doc-name {
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .library-doc-meta {
+    font-size: 11px;
+    color: var(--text-mid);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .library-empty {
+    padding: 32px 16px;
+    font-size: 13px;
+    color: var(--text-mid);
+    text-align: center;
+    line-height: 1.8;
+  }
+
+  /* ライブラリヘッダー：タイトル行（タイトル＋フォルダ追加ボタン） */
+  .library-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .library-btn-add-folder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-mid);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .library-btn-add-folder:active { background: var(--btn-hover); }
+
+  /* フォルダアイテム */
+  .library-folder-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    gap: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .library-folder-item:active { background: var(--btn-hover); }
+  .library-folder-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    color: var(--accent);
+    width: 20px;
+    text-align: center;
+  }
+  .library-folder-name {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .library-folder-count {
+    font-size: 11px;
+    color: var(--text-mid);
+    flex-shrink: 0;
+  }
+  .library-folder-toggle {
+    font-size: 11px;
+    color: var(--text-mid);
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+  .library-folder-toggle.open {
+    transform: rotate(90deg);
+  }
+
+  /* フォルダ内文書リスト */
+  .library-folder-children {
+    display: none;
+    background: var(--bg);
+  }
+  .library-folder-children.open { display: block; }
+  .library-folder-children .library-doc-item {
+    padding-left: 44px;
+  }
+
+  /* フォルダ区切りラベル */
+  .library-section-label {
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    color: var(--text-mid);
+    font-weight: 600;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  /* 長押しポップアップメニュー */
+  .lib-popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 5500;
+  }
+  .lib-popup-overlay.active { display: block; }
+  .lib-popup {
+    position: absolute;
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+    min-width: 160px;
+    overflow: hidden;
+    z-index: 5501;
+    animation: libPopupIn 0.12s ease-out;
+  }
+  @keyframes libPopupIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  .lib-popup-item {
+    display: block;
+    width: 100%;
+    padding: 13px 18px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  /* タッチ中の一時的な選択抑止 */
+  body.no-select,
+  body.no-select * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    -webkit-touch-callout: none !important;
+  }
+  .lib-popup-item:active { background: var(--btn-hover); }
+  .lib-popup-item + .lib-popup-item {
+    border-top: 1px solid var(--border-light);
+  }
+  .lib-popup-item.danger { color: var(--danger); }
+
+  /* 削除確認ダイアログ */
+  .lib-confirm-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 6000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .lib-confirm-overlay.active { display: flex; }
+  .lib-confirm-dialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 24px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .lib-confirm-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .lib-confirm-body {
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.6;
+    margin-bottom: 8px;
+  }
+  .lib-confirm-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .lib-confirm-btn-cancel {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .lib-confirm-btn-cancel:hover, .lib-confirm-btn-cancel:active {
+    background: var(--accent-hover);
+  }
+  .lib-confirm-btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border-color: var(--border);
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .lib-confirm-btn-danger:hover, .lib-confirm-btn-danger:active {
+    background: var(--btn-hover);
+  }
+</style>
+
+<!-- ライブラリパネルHTML -->
+<div class="library-overlay" id="libraryOverlay"></div>
+<div class="library-panel" id="libraryPanel">
+  <div class="library-header">
+    <div class="library-header-row">
+      <div class="library-header-title">ライブラリ</div>
+      <button class="library-btn-add-folder" id="btnAddFolder" title="フォルダを作成">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333333" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+<g transform="translate(18 18) scale(0.9) translate(-18 -18)">
+<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></g></svg>
+<span style="font-size:14px;margin-top:1px;margin-left:1px;">＋</span>
+      </button>
+    </div>
+    <div class="library-sort-row">
+      <button class="library-sort-btn active" id="libSortUpdated" data-sort="updated">
+        更新日時 <span class="library-sort-arrow" id="libSortUpdatedArrow">↓</span>
+      </button>
+      <button class="library-sort-btn" id="libSortCreated" data-sort="created">
+        作成日時 <span class="library-sort-arrow" id="libSortCreatedArrow">↓</span>
+      </button>
+      <button class="library-sort-btn" id="libSortName" data-sort="name">
+        名前順 <span class="library-sort-arrow" id="libSortNameArrow">↑</span>
+      </button>
+    </div>
+  </div>
+  <div class="library-count" id="libraryCount"></div>
+  <div class="library-list" id="libraryList"></div>
+</div>
+
+<!-- ライブラリ長押しポップアップ -->
+<div class="lib-popup-overlay" id="libPopupOverlay">
+  <div class="lib-popup" id="libPopup"></div>
+</div>
+
+<!-- ライブラリ削除確認ダイアログ -->
+<div class="lib-confirm-overlay" id="libConfirmOverlay">
+  <div class="lib-confirm-dialog">
+    <div class="lib-confirm-title" id="libConfirmTitle">削除しますか？</div>
+    <div class="lib-confirm-body" id="libConfirmBody">この操作は取り消せません。</div>
+    <div class="lib-confirm-btns">
+      <button class="btn lib-confirm-btn-cancel" id="libConfirmCancel">キャンセル</button>
+      <button class="btn lib-confirm-btn-danger" id="libConfirmOk">削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- フォルダ移動モーダル -->
+<style>
+  .folder-select-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 6000;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .folder-select-overlay.active { display: flex; }
+  .folder-select-dialog {
+    background: var(--surface);
+    border-radius: 14px;
+    width: 100%;
+    max-width: 320px;
+    padding: 20px 0 12px;
+    display: flex;
+    flex-direction: column;
+    max-height: 70vh;
+  }
+  .folder-select-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    padding: 0 20px 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .folder-select-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .folder-select-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 13px 20px;
+    border: none;
+    background: none;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    gap: 10px;
+  }
+  .folder-select-item:active { background: var(--btn-hover); }
+  .folder-select-item + .folder-select-item {
+    border-top: 1px solid var(--border-light);
+  }
+  .folder-select-item.current {
+    background: var(--accent-light);
+  }
+  .folder-select-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+  }
+  .folder-select-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .folder-select-check {
+    color: var(--accent);
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .folder-select-remove {
+    color: var(--text-mid);
+    border-top: 1px solid var(--border-light) !important;
+  }
+  .folder-select-cancel {
+    display: block;
+    width: calc(100% - 40px);
+    margin: 8px 20px 4px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text-mid);
+    cursor: pointer;
+    text-align: center;
+  }
+  .folder-select-cancel:active { background: var(--btn-hover); }
+</style>
+<div class="folder-select-overlay" id="folderSelectOverlay">
+  <div class="folder-select-dialog">
+    <div class="folder-select-title">移動先フォルダを選択</div>
+    <div class="folder-select-list" id="folderSelectList"></div>
+    <button class="folder-select-cancel" id="folderSelectCancel">キャンセル</button>
+  </div>
+</div>
+
+
+<!-- ══════════════ #TABPANEL タブパネル（右スライド・タブ切替・タブ閉じ） ══════════════ -->
+<style>
+  .tab-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3000;
+  }
+  .tab-overlay.active { display: block; }
+
+  .tab-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 260px;
+    max-width: 75vw;
+    background: var(--surface);
+    z-index: 3001;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s ease-out;
+  }
+  .tab-panel.active { transform: translateX(0); }
+
+  .tab-panel-header {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .tab-panel-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .tab-panel-count {
+    font-size: 12px;
+    color: var(--text-mid);
+  }
+
+  .tab-list-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    gap: 8px;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .tab-item:active { background: var(--btn-hover); }
+  .tab-item.active-tab { background: var(--accent-light); }
+  .tab-item-name {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .tab-item.active-tab .tab-item-name { font-weight: 600; }
+  .tab-item-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: var(--text-mid);
+    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .tab-item-close:active { background: var(--btn-hover); color: var(--danger); }
+
+  .tab-empty {
+    padding: 20px 16px;
+    font-size: 13px;
+    color: var(--text-mid);
+    text-align: center;
+  }
+
+  .tab-panel-actions {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-light);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tab-panel-actions .btn {
+    width: 100%;
+    min-height: 44px;
+    font-size: 14px;
+  }
+</style>
+
+<!-- タブパネルHTML -->
+<div class="tab-overlay" id="tabOverlay"></div>
+<div class="tab-panel" id="tabPanel">
+  <div class="tab-panel-header">
+    <span class="tab-panel-title">タブ一覧</span>
+    <span class="tab-panel-count" id="tabPanelCount"></span>
+  </div>
+  <div class="tab-list-scroll">
+    <div id="tabList"></div>
+  </div>
+  <div class="tab-panel-actions">
+    <button class="btn btn-accent" id="tabPanelNewDoc">新規文書作成</button>
+    <button class="btn" id="tabPanelSave">上書き保存</button>
+    <button class="btn" id="tabPanelSaveAs">別名保存</button>
+  </div>
+</div>
+
+
+<!-- ══════════════ #MODAL HTML出力モーダル・タブ名編集モーダル ══════════════ -->
+<style>
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-overlay.active { display: flex; }
+
+  /* ファイル名編集モーダルは画面中央寄り（上から50%付近）に表示 */
+  .modal-overlay.rename-overlay {
+    align-items: flex-start;
+    padding-top: 50%;              /* ← 元に戻した */
+  }
+
+  .modal {
+    background: var(--surface);
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 16px 16px 0 0;
+    display: flex;
+    flex-direction: column;
+    animation: slideUp 0.25s ease-out;
+  }
+
+  /* ファイル名編集モーダルは角丸を四辺すべてに */
+  .rename-overlay .modal {
+    border-radius: 16px;
+    margin: 0 16px;
+    width: calc(100% - 32px);
+    animation: none;               /* ← 追加：slideUpを無効化 */
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .modal-header h3 { font-size: 15px; font-weight: 700; }
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .modal-body textarea {
+    width: 100%;
+    min-height: 200px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text);
+    background: #fafafa;
+    resize: none;
+  }
+  .modal-footer {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-light);
+  }
+
+  /* ファイル名編集モーダル */
+  .rename-modal-body {
+    padding: 16px;
+  }
+  .rename-modal-body input[type="text"] {
+    width: 100%;
+    font-size: 15px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    background: var(--surface);
+    box-sizing: border-box;
+  }
+  .rename-modal-body input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent, #6c8ebf);
+  }
+</style>
+
+<!-- HTML出力モーダルHTML -->
+<div class="modal-overlay" id="htmlModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>HTML出力</h3>
+      <button class="btn btn-icon" id="btnCloseModal" style="border:none;font-size:20px;">✕</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="htmlOutput" readonly></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-accent" id="btnCopyHtml" style="flex:1;">HTMLをコピー</button>
+      <button class="btn" id="btnCloseModal2">閉じる</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ファイル名編集モーダルHTML -->
+<div class="modal-overlay rename-overlay" id="renameModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>ファイル名を編集</h3>
+      <button class="btn btn-icon" id="btnCloseRenameModal" style="border:none;font-size:20px;">✕</button>
+    </div>
+    <div class="rename-modal-body">
+      <input type="text" id="renameInput" placeholder="ファイル名を入力" maxlength="100">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-accent" id="btnRenameConfirm" style="flex:1;">変更する</button>
+      <button class="btn" id="btnRenameCancel">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════ #CUSTOMTPL カスタムテンプレート ══════════════ -->
+<style>
+  /* --- カスタムテンプレートモーダル --- */
+  .ctpl-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .ctpl-overlay .modal {
+    border-radius: 16px;
+    width: calc(100% - 32px);
+    max-height: 85vh;
+    animation: none;
+  }
+  .ctpl-overlay .modal-header {
+    padding: 10px 16px 6px;
+    border-bottom: none;
+  }
+  .ctpl-overlay .modal-body {
+    padding: 0 12px 8px;
+  }
+
+  /* ソートバー */
+  .ctpl-sort-bar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 4px;
+  }
+  .ctpl-sort-bar select {
+    font-size: 12px;
+    font-family: inherit;
+    padding: 4px 8px;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-mid);
+  }
+
+  /* テンプレートグリッド */
+  .ctpl-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    max-height: 35vh;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+  .ctpl-item {
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--surface);
+    transition: background 0.1s;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .ctpl-item:active {
+    background: var(--btn-hover);
+  }
+  .ctpl-item.selected {
+    background: var(--accent-light);
+    border-color: var(--accent);
+  }
+  .ctpl-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--text-mid);
+    font-size: 13px;
+    padding: 24px 0;
+  }
+
+  /* プレビューエリア */
+  .ctpl-preview-area {
+    margin-top: 6px;
+    border-top: 1px solid var(--border-light);
+    padding-top: 8px;
+  }
+  .ctpl-preview-label {
+    font-size: 12px;
+    color: var(--text-mid);
+    margin-bottom: 4px;
+  }
+  .ctpl-preview-content {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    background: #fafafa;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 120px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    min-height: 50px;
+    color: var(--text-light);
+  }
+
+  /* 編集フォーム */
+  .ctpl-edit-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ctpl-edit-body input[type="text"] {
+    width: 100%;
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    background: var(--surface);
+    box-sizing: border-box;
+    font-family: inherit;
+  }
+  .ctpl-edit-body input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .ctpl-edit-body textarea {
+    width: 100%;
+    min-height: 180px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+    background: #fafafa;
+    resize: none;
+    box-sizing: border-box;
+  }
+  .ctpl-edit-body textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* フッターボタン色分け */
+  .btn-ctpl-new {
+    background: #F2A2C0;
+    color: #fff;
+    border-color: #F2A2C0;
+  }
+  .btn-ctpl-new:hover, .btn-ctpl-new:active {
+    background: var(--accent-hover);
+  }
+  .btn-ctpl-edit {
+    background: var(--accent-light);
+    color: var(--text);
+    border-color: var(--accent-light);
+  }
+  .btn-ctpl-insert {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .btn-ctpl-insert:hover, .btn-ctpl-insert:active {
+    background: #b5a3c8;
+  }
+
+/* 改行なしチェックボックス */
+  .ctpl-insert-option {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-light);
+  }
+  .ctpl-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-mid);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .ctpl-checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+</style>
+
+<!-- カスタムテンプレートモーダルHTML -->
+<div class="modal-overlay ctpl-overlay" id="customTplModal">
+  <div class="modal">
+
+    <!-- ===== 一覧ビュー ===== -->
+    <div id="ctplListView">
+      <div class="modal-header">
+        <h3>カスタムテンプレート</h3>
+        <button class="btn btn-icon" id="btnCloseCtpl" style="border:none;font-size:20px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="ctpl-sort-bar">
+          <select id="ctplSortSelect">
+            <option value="date-desc">新しい順</option>
+            <option value="date-asc">古い順</option>
+            <option value="name-asc">名前 A→Z</option>
+            <option value="name-desc">名前 Z→A</option>
+          </select>
+        </div>
+        <div class="ctpl-grid" id="ctplGrid"></div>
+        <div class="ctpl-preview-area">
+          <div class="ctpl-preview-label">プレビュー</div>
+          <div class="ctpl-preview-content" id="ctplPreview"></div>
+        </div>
+      </div>
+      <div class="ctpl-insert-option">
+        <label class="ctpl-checkbox-label">
+          <input type="checkbox" id="ctplNoNewline">
+          <span>改行なしで挿入</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ctpl-new" id="btnCtplNew" style="flex:1;">新規作成</button>
+        <button class="btn" id="btnCtplDelete" style="flex:1;">削除</button>
+        <button class="btn btn-ctpl-edit" id="btnCtplEdit" style="flex:1;">編集</button>
+        <button class="btn btn-ctpl-insert" id="btnCtplInsert" style="flex:1;">挿入</button>
+      </div>
+    </div>
+
+    <!-- ===== 編集ビュー ===== -->
+    <div id="ctplEditView" style="display:none;">
+      <div class="modal-header">
+        <h3 id="ctplEditTitle">新規作成</h3>
+        <button class="btn btn-icon" id="btnCloseCtplEdit" style="border:none;font-size:20px;">✕</button>
+      </div>
+      <div class="ctpl-edit-body">
+        <input type="text" id="ctplTitleInput" placeholder="タイトル（空欄可）" maxlength="100">
+        <textarea id="ctplContentInput" placeholder="テンプレート内容を入力"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-accent" id="btnCtplSave" style="flex:1;">保存</button>
+        <button class="btn" id="btnCtplEditCancel">キャンセル</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+
+
+// ══════════════ #STATE アプリ状態・DOM参照 ══════════════
+
+const App = {
+  tabs: [],
+  activeTabId: null,
+  nextTabId: 1,
+  previewMode: 'html',
+  isPreview: false,
+  inputTimer: null,
+  saveTimer: null,
+  // カスタムテンプレート用
+  customTemplates: [],
+  selectedCustomTplId: null,
+  customTplSort: 'date-desc',   // 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'
+};
+
+const $ = id => document.getElementById(id);
+const editor          = $('editor');
+const preview         = $('preview');
+const btnUndo         = $('btnUndo');
+const btnRedo         = $('btnRedo');
+const btnPreview      = $('btnPreview');
+const btnHtmlOutput   = $('btnHtmlOutput');
+const previewIndicator = $('previewIndicator');
+const previewModeLabel = $('previewModeLabel');
+const charCount       = $('charCount');
+const templateSelect  = $('templateSelect');
+const toast           = $('toast');
+const htmlModal       = $('htmlModal');
+const htmlOutput      = $('htmlOutput');
+const docNameDisplay  = $('docNameDisplay');
+
+
+// ══════════════ #TOAST トースト通知 ══════════════
+
+function showToast(msg, duration = 1500) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+function showToastAt(msg, anchorEl, duration = 2000) {
+  const rect = anchorEl.getBoundingClientRect();
+  const toastEl = document.getElementById('toast');
+  toastEl.textContent = msg;
+  // いったん全スタイルをリセットしてから位置を指定
+  toastEl.style.cssText = '';
+  toastEl.style.position = 'fixed';
+  toastEl.style.bottom = 'auto';
+  toastEl.style.top = (rect.top - 44) + 'px';
+  toastEl.style.left = '50vw';
+  toastEl.style.transform = 'translateX(-50%)';
+  toastEl.classList.add('show');
+  setTimeout(() => {
+    toastEl.classList.remove('show');
+    setTimeout(() => {
+      toastEl.style.cssText = '';
+    }, 300);
+  }, duration);
+}
+
+
+// ══════════════ #DB IndexedDBライブラリ（文書の保存・読出・更新・削除） ══════════════
+
+const DB_NAME = 'pegmemo';
+const DB_VERSION = 3;
+let db = null;
+
+const LS_DOCS_KEY = 'pegmemo_docs';
+const LS_NEXTID_KEY = 'pegmemo_nextid';
+
+function lsGetDocs() {
+  try {
+    const raw = localStorage.getItem(LS_DOCS_KEY);
+    if (!raw) return [];
+    const docs = JSON.parse(raw);
+    docs.forEach(d => {
+      d.createdAt = new Date(d.createdAt);
+      d.updatedAt = new Date(d.updatedAt);
+    });
+    return docs;
+  } catch (e) {
+    return [];
+  }
+}
+
+function lsSaveDocs(docs) {
+  localStorage.setItem(LS_DOCS_KEY, JSON.stringify(docs));
+}
+
+function lsNextId() {
+  let id = parseInt(localStorage.getItem(LS_NEXTID_KEY) || '0', 10);
+  id++;
+  localStorage.setItem(LS_NEXTID_KEY, String(id));
+  return id;
+}
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error('IndexedDB非対応'));
+      return;
+    }
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const database = e.target.result;
+      if (!database.objectStoreNames.contains('docs')) {
+        const store = database.createObjectStore('docs', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('name', 'name', { unique: false });
+        store.createIndex('folderId', 'folderId', { unique: false });
+        store.createIndex('createdAt', 'createdAt', { unique: false });
+        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!database.objectStoreNames.contains('folders')) {
+        const fStore = database.createObjectStore('folders', { keyPath: 'id', autoIncrement: true });
+        fStore.createIndex('name', 'name', { unique: false });
+        fStore.createIndex('createdAt', 'createdAt', { unique: false });
+        fStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+      if (!database.objectStoreNames.contains('customTemplates')) {
+        const ctStore = database.createObjectStore('customTemplates', { keyPath: 'id', autoIncrement: true });
+        ctStore.createIndex('title', 'title', { unique: false });
+        ctStore.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = (e) => { reject(e.target.error || new Error('DB open error')); };
+    req.onblocked = () => { reject(new Error('DBがブロックされています（他のタブを閉じてください）')); };
+  });
+}
+
+function saveNewDoc(name, content) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const now = new Date();
+      const doc = { name, content, folderId: null, createdAt: now, updatedAt: now };
+      const tx = db.transaction('docs', 'readwrite');
+      const store = tx.objectStore('docs');
+      const req = store.add(doc);
+      req.onsuccess = () => { doc.id = req.result; resolve(doc); };
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const now = new Date();
+    const doc = { id: lsNextId(), name, content, folderId: null, createdAt: now, updatedAt: now };
+    const docs = lsGetDocs();
+    docs.push(doc);
+    lsSaveDocs(docs);
+    return Promise.resolve(doc);
+  }
+}
+
+function updateDoc(id, changes) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readwrite');
+      const store = tx.objectStore('docs');
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const doc = getReq.result;
+        if (!doc) { reject(new Error('文書が見つかりません')); return; }
+        Object.assign(doc, changes, { updatedAt: new Date() });
+        const putReq = store.put(doc);
+        putReq.onsuccess = () => resolve(doc);
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    });
+  } else {
+    const docs = lsGetDocs();
+    const idx = docs.findIndex(d => d.id === id);
+    if (idx === -1) return Promise.reject(new Error('文書が見つかりません'));
+    Object.assign(docs[idx], changes, { updatedAt: new Date() });
+    lsSaveDocs(docs);
+    return Promise.resolve(docs[idx]);
+  }
+}
+
+function getDoc(id) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readonly');
+      const store = tx.objectStore('docs');
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const docs = lsGetDocs();
+    return Promise.resolve(docs.find(d => d.id === id) || null);
+  }
+}
+
+function getAllDocs() {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readonly');
+      const store = tx.objectStore('docs');
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    return Promise.resolve(lsGetDocs());
+  }
+}
+
+function deleteDoc(id) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('docs', 'readwrite');
+      const store = tx.objectStore('docs');
+      const req = store.delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const docs = lsGetDocs();
+    lsSaveDocs(docs.filter(d => d.id !== id));
+    return Promise.resolve();
+  }
+}
+
+// --- フォルダ管理（IndexedDB / localStorageフォールバック） ---
+
+const LS_FOLDERS_KEY = 'pegmemo_folders';
+const LS_FOLDER_NEXTID_KEY = 'pegmemo_folder_nextid';
+
+function lsGetFolders() {
+  try {
+    const raw = localStorage.getItem(LS_FOLDERS_KEY);
+    if (!raw) return [];
+    const folders = JSON.parse(raw);
+    folders.forEach(f => {
+      f.createdAt = new Date(f.createdAt);
+      f.updatedAt = new Date(f.updatedAt);
+    });
+    return folders;
+  } catch (e) {
+    return [];
+  }
+}
+
+function lsSaveFolders(folders) {
+  localStorage.setItem(LS_FOLDERS_KEY, JSON.stringify(folders));
+}
+
+function lsFolderNextId() {
+  let id = parseInt(localStorage.getItem(LS_FOLDER_NEXTID_KEY) || '0', 10);
+  id++;
+  localStorage.setItem(LS_FOLDER_NEXTID_KEY, String(id));
+  return id;
+}
+
+function saveNewFolder(name) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const now = new Date();
+      const folder = { name, createdAt: now, updatedAt: now };
+      const tx = db.transaction('folders', 'readwrite');
+      const store = tx.objectStore('folders');
+      const req = store.add(folder);
+      req.onsuccess = () => { folder.id = req.result; resolve(folder); };
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const now = new Date();
+    const folder = { id: lsFolderNextId(), name, createdAt: now, updatedAt: now };
+    const folders = lsGetFolders();
+    folders.push(folder);
+    lsSaveFolders(folders);
+    return Promise.resolve(folder);
+  }
+}
+
+function getAllFolders() {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('folders', 'readonly');
+      const store = tx.objectStore('folders');
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    return Promise.resolve(lsGetFolders());
+  }
+}
+
+function updateFolder(id, changes) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('folders', 'readwrite');
+      const store = tx.objectStore('folders');
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const folder = getReq.result;
+        if (!folder) { reject(new Error('フォルダが見つかりません')); return; }
+        Object.assign(folder, changes, { updatedAt: new Date() });
+        const putReq = store.put(folder);
+        putReq.onsuccess = () => resolve(folder);
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    });
+  } else {
+    const folders = lsGetFolders();
+    const idx = folders.findIndex(f => f.id === id);
+    if (idx === -1) return Promise.reject(new Error('フォルダが見つかりません'));
+    Object.assign(folders[idx], changes, { updatedAt: new Date() });
+    lsSaveFolders(folders);
+    return Promise.resolve(folders[idx]);
+  }
+}
+
+function deleteFolder(id) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('folders', 'readwrite');
+      const store = tx.objectStore('folders');
+      const req = store.delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const folders = lsGetFolders();
+    lsSaveFolders(folders.filter(f => f.id !== id));
+    return Promise.resolve();
+  }
+}
+
+// フォルダ内の全文書のfolderIdをnullに戻す
+async function detachDocsFromFolder(folderId) {
+  const docs = await getAllDocs();
+  const targets = docs.filter(d => d.folderId === folderId);
+  for (const doc of targets) {
+    await updateDoc(doc.id, { folderId: null });
+  }
+}
+
+// フォルダを複製（中の文書は複製しない、空フォルダとして作成）
+async function duplicateFolder(folderId) {
+  const folders = await getAllFolders();
+  const src = folders.find(f => f.id === folderId);
+  if (!src) throw new Error('フォルダが見つかりません');
+  const newName = src.name + ' (コピー)';
+  return await saveNewFolder(newName);
+}
+
+// --- カスタムテンプレート管理（IndexedDB / localStorageフォールバック） ---
+
+const LS_CTPL_KEY = 'pegmemo_custom_templates';
+const LS_CTPL_NEXTID_KEY = 'pegmemo_ctpl_nextid';
+
+function lsGetCustomTemplates() {
+  try {
+    const raw = localStorage.getItem(LS_CTPL_KEY);
+    if (!raw) return [];
+    const tpls = JSON.parse(raw);
+    tpls.forEach(t => {
+      t.createdAt = new Date(t.createdAt);
+      t.updatedAt = new Date(t.updatedAt);
+    });
+    return tpls;
+  } catch (e) {
+    return [];
+  }
+}
+
+function lsSaveCustomTemplates(tpls) {
+  localStorage.setItem(LS_CTPL_KEY, JSON.stringify(tpls));
+}
+
+function lsCtplNextId() {
+  let id = parseInt(localStorage.getItem(LS_CTPL_NEXTID_KEY) || '0', 10);
+  id++;
+  localStorage.setItem(LS_CTPL_NEXTID_KEY, String(id));
+  return id;
+}
+
+function saveNewCustomTemplate(title, content) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const now = new Date();
+      const tpl = { title, content, createdAt: now, updatedAt: now };
+      const tx = db.transaction('customTemplates', 'readwrite');
+      const store = tx.objectStore('customTemplates');
+      const req = store.add(tpl);
+      req.onsuccess = () => { tpl.id = req.result; resolve(tpl); };
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const now = new Date();
+    const tpl = { id: lsCtplNextId(), title, content, createdAt: now, updatedAt: now };
+    const tpls = lsGetCustomTemplates();
+    tpls.push(tpl);
+    lsSaveCustomTemplates(tpls);
+    return Promise.resolve(tpl);
+  }
+}
+
+function getAllCustomTemplates() {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('customTemplates', 'readonly');
+      const store = tx.objectStore('customTemplates');
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    return Promise.resolve(lsGetCustomTemplates());
+  }
+}
+
+function updateCustomTemplate(id, changes) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('customTemplates', 'readwrite');
+      const store = tx.objectStore('customTemplates');
+      const getReq = store.get(id);
+      getReq.onsuccess = () => {
+        const tpl = getReq.result;
+        if (!tpl) { reject(new Error('テンプレートが見つかりません')); return; }
+        Object.assign(tpl, changes, { updatedAt: new Date() });
+        const putReq = store.put(tpl);
+        putReq.onsuccess = () => resolve(tpl);
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => reject(getReq.error);
+    });
+  } else {
+    const tpls = lsGetCustomTemplates();
+    const idx = tpls.findIndex(t => t.id === id);
+    if (idx === -1) return Promise.reject(new Error('テンプレートが見つかりません'));
+    Object.assign(tpls[idx], changes, { updatedAt: new Date() });
+    lsSaveCustomTemplates(tpls);
+    return Promise.resolve(tpls[idx]);
+  }
+}
+
+function deleteCustomTemplate(id) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('customTemplates', 'readwrite');
+      const store = tx.objectStore('customTemplates');
+      const req = store.delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } else {
+    const tpls = lsGetCustomTemplates();
+    lsSaveCustomTemplates(tpls.filter(t => t.id !== id));
+    return Promise.resolve();
+  }
+}
+
+
+// ══════════════ #TAB タブ管理（作成・切替・削除） ══════════════
+
+function createTab(docId, docName, content) {
+  const tab = {
+    tabId: App.nextTabId++,
+    docId: docId || null,
+    docName: docName || '',
+    content: content || '',
+    cursorStart: 0,
+    cursorEnd: 0,
+    undoStack: [],
+    redoStack: [],
+    isDirty: false,
+  };
+  App.tabs.push(tab);
+  switchTab(tab.tabId);
+  return tab;
+}
+
+function saveCurrentTabState() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  if (tab.content !== editor.value) tab.isDirty = true;
+  tab.content = editor.value;
+  tab.cursorStart = editor.selectionStart;
+  tab.cursorEnd = editor.selectionEnd;
+}
+
+function switchTab(tabId) {
+  if (App.activeTabId !== null) {
+    saveCurrentTabState();
+  }
+  App.activeTabId = tabId;
+  const tab = getActiveTab();
+  if (!tab) return;
+
+  editor.value = tab.content;
+  editor.selectionStart = tab.cursorStart;
+  editor.selectionEnd = tab.cursorEnd;
+  updateDocNameDisplay();
+  updateUndoButtons();
+  updateCharCount();
+  if (App.isPreview) renderPreview();
+  autosave();
+}
+
+function getActiveTab() {
+  return App.tabs.find(t => t.tabId === App.activeTabId) || null;
+}
+
+function isTabUnsaved(tab) {
+  // 内容があり、かつ一度も保存していない（docIdなし）か、保存後に編集されている（isDirty）
+  return tab.content.trim().length > 0 && (tab.docId === null || tab.isDirty);
+}
+
+function closeTab(tabId) {
+  const idx = App.tabs.findIndex(t => t.tabId === tabId);
+  if (idx === -1) return;
+
+  if (App.tabs.length === 1) {
+    // 最後のひとつ → 新しい空の無題タブに切り替える
+    App.tabs = [];
+    App.activeTabId = null;
+    createTab(null, '', '');
+    saveUndoState();
+    autosave();
+    showToast('新しい文書を開きました');
+    return;
+  }
+
+  const closingTab = App.tabs[idx];
+  App.tabs.splice(idx, 1);
+
+  if (closingTab.tabId === App.activeTabId) {
+    const newIdx = Math.min(idx, App.tabs.length - 1);
+    App.activeTabId = null;
+    switchTab(App.tabs[newIdx].tabId);
+  }
+  autosave();
+  showToast('タブを閉じました');
+}
+
+function updateDocNameDisplay() {
+  const tab = getActiveTab();
+  if (!tab || !tab.docName) {
+    docNameDisplay.textContent = '無題';
+    docNameDisplay.classList.add('untitled');
+  } else {
+    docNameDisplay.textContent = tab.docName;
+    docNameDisplay.classList.remove('untitled');
+  }
+  // タブ数を更新
+  const badge = document.getElementById('tabCountBadge');
+  if (badge) badge.textContent = App.tabs.length;
+}
+
+function findTabByDocId(docId) {
+  if (!docId) return null;
+  return App.tabs.find(t => t.docId === docId) || null;
+}
+
+
+// ══════════════ #STATUS 文字数カウント ══════════════
+
+function updateCharCount() {
+  const text = editor.value;
+  const stripped = text.replace(/<[^>]*>/g, '').replace(/\n/g, '');
+  charCount.textContent = stripped.length + ' 文字';
+}
+
+
+// ══════════════ #AUTOSAVE localStorage自動保存・復元 ══════════════
+
+const AUTOSAVE_KEY = 'pegmemo_autosave';
+
+function autosave() {
+  try {
+    saveCurrentTabState();
+    const data = {
+      tabs: App.tabs,
+      activeTabId: App.activeTabId,
+      nextTabId: App.nextTabId,
+    };
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(data));
+  } catch (e) {
+    // ストレージ容量超過などは無視
+  }
+}
+
+function restoreAutosave() {
+  try {
+    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    if (!raw) return false;
+
+    const data = JSON.parse(raw);
+
+    // 旧形式（文字列だけ保存されていた場合）の互換処理
+    if (typeof data === 'string') {
+      if (data.length > 0) {
+        createTab(null, '', data);
+        showToast('前回の内容を復元しました');
+      }
+      return data.length > 0;
+    }
+
+    // 新形式：タブ配列を復元
+    if (data.tabs && data.tabs.length > 0) {
+      App.tabs = data.tabs;
+      App.nextTabId = data.nextTabId || (data.tabs.length + 1);
+      const targetId = data.activeTabId || data.tabs[0].tabId;
+      App.activeTabId = null;
+      switchTab(targetId);
+      showToast('前回の状態を復元しました');
+      return true;
+    }
+  } catch (e) {
+    // 読み取りエラーは無視
+  }
+  return false;
+}
+
+
+// ══════════════ #UNDO Undo / Redo ══════════════
+
+function saveUndoState() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const state = {
+    text: editor.value,
+    start: editor.selectionStart,
+    end: editor.selectionEnd,
+  };
+  if (tab.undoStack.length > 0) {
+    const last = tab.undoStack[tab.undoStack.length - 1];
+    if (last.text === state.text) return;
+  }
+  tab.undoStack.push(state);
+  if (tab.undoStack.length > 200) tab.undoStack.shift();
+  tab.redoStack = [];
+  updateUndoButtons();
+}
+
+function restoreState(state) {
+  editor.value = state.text;
+  editor.selectionStart = state.start;
+  editor.selectionEnd = state.end;
+  editor.focus();
+  updateCharCount();
+}
+
+function undo() {
+  const tab = getActiveTab();
+  if (!tab || tab.undoStack.length === 0) return;
+  const current = { text: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
+  tab.redoStack.push(current);
+  restoreState(tab.undoStack.pop());
+  updateUndoButtons();
+}
+
+function redo() {
+  const tab = getActiveTab();
+  if (!tab || tab.redoStack.length === 0) return;
+  const current = { text: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
+  tab.undoStack.push(current);
+  restoreState(tab.redoStack.pop());
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  const tab = getActiveTab();
+  btnUndo.disabled = !tab || tab.undoStack.length === 0;
+  btnRedo.disabled = !tab || tab.redoStack.length === 0;
+}
+
+editor.addEventListener('input', () => {
+  clearTimeout(App.inputTimer);
+  App.inputTimer = setTimeout(() => saveUndoState(), 500);
+  clearTimeout(App.saveTimer);
+  App.saveTimer = setTimeout(() => autosave(), 2000);
+  updateCharCount();
+});
+
+btnUndo.addEventListener('click', undo);
+btnRedo.addEventListener('click', redo);
+
+editor.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+  }
+});
+
+
+// ══════════════ #TOOLBAR ツールバー（書式ボタン・罫線・テンプレ選択・文字数） ══════════════
+
+// --- 疑似カーソル（テンプレ・罫線ポップアップ用） ---
+const CURSOR_MARKER = '\u258C'; // ▌
+let savedCursorPos = 0;
+
+function saveCursorPos() {
+  savedCursorPos = editor.selectionStart;
+}
+
+function insertCursorMarker() {
+  const pos = savedCursorPos;
+  const text = editor.value;
+  editor.value = text.substring(0, pos) + CURSOR_MARKER + text.substring(pos);
+}
+
+function removeCursorMarker() {
+  const pos = editor.value.indexOf(CURSOR_MARKER);
+  if (pos === -1) return;
+  editor.value = editor.value.replace(CURSOR_MARKER, '');
+  editor.selectionStart = pos;
+  editor.selectionEnd = pos;
+}
+
+function insertAtCursor(before, after = '') {
+  saveUndoState();
+  const start = editor.selectionStart;
+  const end = editor.selectionEnd;
+  const text = editor.value;
+  const selected = text.substring(start, end);
+  let insert = selected ? before + selected + after : before + after;
+
+  editor.value = text.substring(0, start) + insert + text.substring(end);
+
+  if (selected) {
+    editor.selectionStart = start;
+    editor.selectionEnd = start + insert.length;
+  } else {
+    const cursorPos = start + before.length;
+    editor.selectionStart = cursorPos;
+    editor.selectionEnd = cursorPos;
+  }
+  editor.focus();
+  saveUndoState();
+  updateCharCount();
+}
+
+function insertLine(line, noNewline = false) {
+  // 疑似カーソルがあればその位置を使う（マーカーは先に除去）
+  const markerPos = editor.value.indexOf(CURSOR_MARKER);
+  if (markerPos !== -1) {
+    editor.value = editor.value.replace(CURSOR_MARKER, '');
+    editor.selectionStart = markerPos;
+    editor.selectionEnd = markerPos;
+  }
+
+  saveUndoState();
+  const start = editor.selectionStart;
+  const text = editor.value;
+
+  if (noNewline) {
+    editor.value = text.substring(0, start) + line + text.substring(start);
+    const newPos = start + line.length;
+    editor.selectionStart = newPos;
+    editor.selectionEnd = newPos;
+  } else {
+    let prefix = '';
+    if (start > 0 && text[start - 1] !== '\n') prefix = '\n';
+    let suffix = '\n';
+    editor.value = text.substring(0, start) + prefix + line + suffix + text.substring(start);
+    const newPos = start + prefix.length + line.length + suffix.length;
+    editor.selectionStart = newPos;
+    editor.selectionEnd = newPos;
+  }
+
+  editor.focus();
+  saveUndoState();
+  updateCharCount();
+}
+
+document.getElementById('toolbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  switch (btn.dataset.action) {
+    case 'h3': insertAtCursor('<h3>', '</h3>'); break;
+    case 'h4': insertAtCursor('<h4>', '</h4>'); break;
+  }
+});
+
+const hrBtn = document.getElementById('hrBtn');
+const hrPopup = document.getElementById('hrPopup');
+
+// カーソル位置を保存（フォーカスが移る前に捕まえる）
+hrBtn.addEventListener('mousedown', saveCursorPos);
+hrBtn.addEventListener('touchstart', saveCursorPos, { passive: true });
+
+hrBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  // テンプレポップアップが開いていたら閉じる
+  if (tplPopup.classList.contains('open')) {
+    tplPopup.classList.remove('open');
+    removeCursorMarker();
+  }
+  const wasOpen = hrPopup.classList.contains('open');
+  if (wasOpen) {
+    hrPopup.classList.remove('open');
+    removeCursorMarker();
+  } else {
+    const rect = hrBtn.getBoundingClientRect();
+    hrPopup.style.top = (rect.bottom + 4) + 'px';
+    hrPopup.style.left = rect.left + 'px';
+    insertCursorMarker();
+    hrPopup.classList.add('open');
+  }
+});
+
+hrPopup.addEventListener('click', (e) => {
+  const item = e.target.closest('.tpl-popup-item');
+  if (!item) return;
+  const val = item.dataset.hr;
+  switch (val) {
+    case 'hr':        insertLine('<hr>'); break;
+    case 'hr-light':  insertLine('<hr style="border: none; border-top: 1px solid #ccc; margin: 1em 0;">'); break;
+    case 'hr-xlight': insertLine('<hr style="border: none; border-top: 1px solid #ddd; margin: 1em 0;">'); break;
+  }
+  hrPopup.classList.remove('open');
+});
+
+
+// ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════
+
+const menuOverlay       = $('menuOverlay');
+const menuPanel         = $('menuPanel');
+const menuHistory       = $('menuHistory');
+const nameDialogOverlay = $('nameDialogOverlay');
+const nameDialogInput   = $('nameDialogInput');
+const nameDialogTitle   = $('nameDialogTitle');
+
+function openMenu() {
+  menuOverlay.classList.add('active');
+  menuPanel.classList.add('active');
+  loadMenuHistory();
+}
+
+function closeMenu() {
+  menuPanel.classList.remove('active');
+  menuOverlay.classList.remove('active');
+}
+
+menuOverlay.addEventListener('click', closeMenu);
+
+function showNameDialog(title, defaultValue) {
+  return new Promise((resolve) => {
+    nameDialogTitle.textContent = title || 'ファイル名を入力';
+    nameDialogInput.value = defaultValue || '';
+    nameDialogOverlay.classList.add('active');
+    setTimeout(() => nameDialogInput.focus(), 100);
+
+    function cleanup() {
+      nameDialogOverlay.classList.remove('active');
+      $('nameDialogOk').removeEventListener('click', onOk);
+      $('nameDialogCancel').removeEventListener('click', onCancel);
+      nameDialogOverlay.removeEventListener('click', onBgClick);
+    }
+    function onOk() { const val = nameDialogInput.value.trim(); cleanup(); resolve(val || null); }
+    function onCancel() { cleanup(); resolve(null); }
+    function onBgClick(e) { if (e.target === nameDialogOverlay) { cleanup(); resolve(null); } }
+
+    $('nameDialogOk').addEventListener('click', onOk);
+    $('nameDialogCancel').addEventListener('click', onCancel);
+    nameDialogOverlay.addEventListener('click', onBgClick);
+    nameDialogInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); onOk(); } };
+  });
+}
+
+async function doSave() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const content = editor.value;
+
+  if (tab.docId) {
+    try {
+      await updateDoc(tab.docId, { content });
+      tab.isDirty = false;
+      autosave();
+      showToast('保存しました');
+    } catch (e) {
+      showToast('保存に失敗しました');
+      console.error('Save error:', e);
+    }
+  } else {
+    await doSaveAs();
+  }
+}
+
+async function doSaveAs() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const defaultName = tab.docName || '';
+  const name = await showNameDialog('ファイル名を入力', defaultName);
+  if (!name) return;
+
+  try {
+    const doc = await saveNewDoc(name, editor.value);
+    tab.docId = doc.id;
+    tab.docName = doc.name;
+    tab.isDirty = false;
+    updateDocNameDisplay();
+    autosave();
+    showToast('「' + doc.name + '」を保存しました');
+  } catch (e) {
+    showToast('保存に失敗しました');
+    console.error('Save error:', e);
+  }
+}
+
+async function doNewDoc() {
+  createTab(null, '', '');
+  saveUndoState();
+  autosave();
+  showToast('新しいタブを開きました');
+}
+
+async function loadMenuHistory() {
+  menuHistory.innerHTML = '';
+  try {
+    const docs = await getAllDocs();
+    if (docs.length === 0) {
+      menuHistory.innerHTML = '<div style="padding:10px 16px;font-size:12px;color:var(--text-mid);">履歴はありません</div>';
+      return;
+    }
+    docs.sort((a, b) => {
+      const da = a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt);
+      const db2 = b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt);
+      return db2 - da;
+    });
+    const recent = docs.slice(0, 5);
+
+    recent.forEach(doc => {
+      const btn = document.createElement('button');
+      btn.className = 'menu-history-item';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'menu-history-name';
+      nameSpan.textContent = doc.name;
+
+      const dateSpan = document.createElement('span');
+      dateSpan.className = 'menu-history-date';
+      const d = doc.updatedAt instanceof Date ? doc.updatedAt : new Date(doc.updatedAt);
+      if (!isNaN(d.getTime())) {
+        dateSpan.textContent = d.getFullYear() + '/' +
+          String(d.getMonth() + 1).padStart(2, '0') + '/' +
+          String(d.getDate()).padStart(2, '0') + ' ' +
+          String(d.getHours()).padStart(2, '0') + ':' +
+          String(d.getMinutes()).padStart(2, '0');
+      } else {
+        dateSpan.textContent = '(日時不明)';
+      }
+
+      btn.appendChild(nameSpan);
+      btn.appendChild(dateSpan);
+      btn.addEventListener('click', () => openDocFromHistory(doc.id));
+      menuHistory.appendChild(btn);
+    });
+  } catch (e) {
+    showToast('履歴読込エラー: ' + e.message);
+    console.error('History load error:', e);
+  }
+}
+
+async function openDocFromHistory(id) {
+  const existingTab = findTabByDocId(id);
+  if (existingTab) {
+    switchTab(existingTab.tabId);
+    closeMenu();
+    showToast('タブを切り替えました');
+    return;
+  }
+
+  try {
+    const doc = await getDoc(id);
+    if (!doc) { showToast('文書が見つかりません'); return; }
+
+    // 空の無題タブが1つだけある場合は上書きして開く
+    const activeTab = getActiveTab();
+    if (App.tabs.length === 1 && activeTab && activeTab.docId === null && activeTab.content.trim() === '') {
+      activeTab.docId = doc.id;
+      activeTab.docName = doc.name;
+      activeTab.content = doc.content;
+      activeTab.isDirty = false;
+      editor.value = doc.content;
+      updateDocNameDisplay();
+      updateCharCount();
+      saveUndoState();
+      autosave();
+      closeMenu();
+      showToast('「' + doc.name + '」を開きました');
+      return;
+    }
+
+    createTab(doc.id, doc.name, doc.content);
+    saveUndoState();
+    autosave();
+    closeMenu();
+    showToast('「' + doc.name + '」を開きました');
+  } catch (e) {
+    showToast('文書を開けませんでした');
+    console.error('Open doc error:', e);
+  }
+}
+
+$('menuSave').addEventListener('click', async () => { closeMenu(); await doSave(); });
+$('menuSaveAs').addEventListener('click', async () => { closeMenu(); await doSaveAs(); });
+$('menuNewDoc').addEventListener('click', async () => { closeMenu(); await doNewDoc(); });
+
+// タブパネル内ボタン
+$('tabPanelNewDoc').addEventListener('click', async () => { closeTabPanel(); await doNewDoc(); });
+$('tabPanelSave').addEventListener('click', async () => { closeTabPanel(); await doSave(); });
+$('tabPanelSaveAs').addEventListener('click', async () => { closeTabPanel(); await doSaveAs(); });
+
+
+// ══════════════ #LIBRARY ライブラリパネル（全文書一覧・フォルダ・ソート） ══════════════
+
+const libraryOverlay = $('libraryOverlay');
+const libraryPanel   = $('libraryPanel');
+const libraryList    = $('libraryList');
+const libraryCount   = $('libraryCount');
+
+// ソート状態
+const LibSort = {
+  key: 'updated',   // 'updated' | 'created' | 'name'
+  asc: false,       // false=降順 true=昇順（nameのみデフォルト昇順）
+};
+
+// フォルダ開閉状態（folderId → true/false）
+const FolderOpenState = {};
+
+function openLibrary() {
+  libraryOverlay.classList.add('active');
+  libraryPanel.classList.add('active');
+  renderLibrary();
+}
+
+function closeLibrary() {
+  libraryPanel.classList.remove('active');
+  libraryOverlay.classList.remove('active');
+}
+
+libraryOverlay.addEventListener('click', closeLibrary);
+
+// ソートボタンのクリック処理
+document.querySelectorAll('.library-sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const sort = btn.dataset.sort;
+    if (LibSort.key === sort) {
+      LibSort.asc = !LibSort.asc;
+    } else {
+      LibSort.key = sort;
+      LibSort.asc = (sort === 'name');
+    }
+    updateSortButtons();
+    renderLibrary();
+  });
+});
+
+function updateSortButtons() {
+  const keys = ['updated', 'created', 'name'];
+  keys.forEach(k => {
+    const btn   = document.querySelector(`.library-sort-btn[data-sort="${k}"]`);
+    const arrow = btn.querySelector('.library-sort-arrow');
+    if (LibSort.key === k) {
+      btn.classList.add('active');
+      arrow.textContent = LibSort.asc ? '↑' : '↓';
+    } else {
+      btn.classList.remove('active');
+      arrow.textContent = (k === 'name') ? '↑' : '↓';
+    }
+  });
+}
+
+function formatDate(val) {
+  const d = val instanceof Date ? val : new Date(val);
+  if (isNaN(d.getTime())) return '(日時不明)';
+  return d.getFullYear() + '/' +
+    String(d.getMonth() + 1).padStart(2, '0') + '/' +
+    String(d.getDate()).padStart(2, '0') + ' ' +
+    String(d.getHours()).padStart(2, '0') + ':' +
+    String(d.getMinutes()).padStart(2, '0');
+}
+
+// ソート用共通関数
+function sortItems(items) {
+  items.sort((a, b) => {
+    let valA, valB;
+    if (LibSort.key === 'updated') {
+      valA = (a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt)).getTime();
+      valB = (b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt)).getTime();
+    } else if (LibSort.key === 'created') {
+      valA = (a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt)).getTime();
+      valB = (b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt)).getTime();
+    } else {
+      valA = (a.name || '').toLowerCase();
+      valB = (b.name || '').toLowerCase();
+    }
+    if (valA < valB) return LibSort.asc ? -1 : 1;
+    if (valA > valB) return LibSort.asc ? 1 : -1;
+    return 0;
+  });
+}
+
+// 文書アイテムのDOM要素を生成する共通関数
+function createDocItemEl(doc) {
+  const btn = document.createElement('button');
+  btn.className = 'library-doc-item';
+
+  if (findTabByDocId(doc.id)) {
+    btn.classList.add('open-tab');
+  }
+
+  const nameDiv = document.createElement('div');
+  nameDiv.className = 'library-doc-name';
+  nameDiv.textContent = doc.name || '(無題)';
+
+  const metaDiv = document.createElement('div');
+  metaDiv.className = 'library-doc-meta';
+  if (LibSort.key === 'created') {
+    metaDiv.textContent = '作成: ' + formatDate(doc.createdAt);
+  } else {
+    metaDiv.textContent = '更新: ' + formatDate(doc.updatedAt);
+  }
+
+  btn.appendChild(nameDiv);
+  btn.appendChild(metaDiv);
+
+  // 長押しで文書ポップアップ
+  let docLpTimer = null;
+  let docLpFired = false;
+  btn.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+  btn.addEventListener('touchstart', (e) => {
+    docLpFired = false;
+    document.body.classList.add('no-select');
+    const touch = e.touches[0];
+    const tx = touch.clientX, ty = touch.clientY;
+    docLpTimer = setTimeout(() => {
+      docLpFired = true;
+      docLpTimer = null;
+      window.getSelection().removeAllRanges();
+      showDocPopup(doc, tx, ty);
+      requestAnimationFrame(() => { window.getSelection().removeAllRanges(); });
+    }, 500);
+  }, { passive: false });
+  btn.addEventListener('touchend', (e) => {
+    document.body.classList.remove('no-select');
+    if (docLpFired) { e.preventDefault(); docLpFired = false; return; }
+    clearTimeout(docLpTimer);
+    docLpTimer = null;
+  });
+  btn.addEventListener('touchmove', () => {
+    if (!docLpFired) { clearTimeout(docLpTimer); docLpTimer = null; }
+  });
+  btn.addEventListener('touchcancel', () => {
+    document.body.classList.remove('no-select');
+    if (!docLpFired) { clearTimeout(docLpTimer); docLpTimer = null; }
+  });
+
+  btn.addEventListener('click', async () => {
+    if (docLpFired) return;
+    await openDocFromLibrary(doc.id);
+  });
+
+  return btn;
+}
+
+async function renderLibrary() {
+  libraryList.innerHTML = '<div class="library-empty">読み込み中…</div>';
+  libraryCount.textContent = '';
+
+  let docs, folders;
+  try {
+    [docs, folders] = await Promise.all([getAllDocs(), getAllFolders()]);
+  } catch (e) {
+    libraryList.innerHTML = '<div class="library-empty">読み込みに失敗しました</div>';
+    return;
+  }
+
+  if (docs.length === 0 && folders.length === 0) {
+    libraryList.innerHTML = '<div class="library-empty">保存された文書はありません</div>';
+    libraryCount.textContent = '';
+    return;
+  }
+
+  // フォルダごとに文書を振り分け
+  const folderMap = {};  // folderId → [doc, ...]
+  const looseDocs = [];  // フォルダ未所属
+  docs.forEach(doc => {
+    if (doc.folderId && folders.some(f => f.id === doc.folderId)) {
+      if (!folderMap[doc.folderId]) folderMap[doc.folderId] = [];
+      folderMap[doc.folderId].push(doc);
+    } else {
+      looseDocs.push(doc);
+    }
+  });
+
+  // ソート
+  sortItems(folders);
+  sortItems(looseDocs);
+  Object.values(folderMap).forEach(arr => sortItems(arr));
+
+  libraryCount.textContent = docs.length + ' 件（' + folders.length + ' フォルダ）';
+  libraryList.innerHTML = '';
+
+  // --- フォルダ表示 ---
+  folders.forEach(folder => {
+    const folderDocs = folderMap[folder.id] || [];
+    const isOpen = !!FolderOpenState[folder.id];
+
+    // フォルダ行
+    const folderRow = document.createElement('div');
+    folderRow.className = 'library-folder-item';
+
+    const toggleSpan = document.createElement('span');
+    toggleSpan.className = 'library-folder-toggle' + (isOpen ? ' open' : '');
+    toggleSpan.textContent = '▶';
+
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'library-folder-icon';
+    iconSpan.innerHTML = isOpen
+      ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333333" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="2" y1="10" x2="22" y2="10"/></svg>'
+
+      : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333333" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'library-folder-name';
+    nameSpan.textContent = folder.name;
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'library-folder-count';
+    countSpan.textContent = folderDocs.length + ' 件';
+
+    folderRow.appendChild(toggleSpan);
+    folderRow.appendChild(iconSpan);
+    folderRow.appendChild(nameSpan);
+    folderRow.appendChild(countSpan);
+
+    // タップで開閉
+    folderRow.addEventListener('click', () => {
+      FolderOpenState[folder.id] = !FolderOpenState[folder.id];
+      renderLibrary();
+    });
+
+    // 長押しでポップアップ
+    let lpTimer = null;
+    folderRow.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+    folderRow.addEventListener('touchstart', (e) => {
+      document.body.classList.add('no-select');
+      const touch = e.touches[0];
+      const tx = touch.clientX, ty = touch.clientY;
+      lpTimer = setTimeout(() => {
+        lpTimer = 'fired';
+        window.getSelection().removeAllRanges();
+        showFolderPopup(folder, tx, ty);
+        requestAnimationFrame(() => { window.getSelection().removeAllRanges(); });
+      }, 500);
+    }, { passive: false });
+    folderRow.addEventListener('touchend', () => {
+      document.body.classList.remove('no-select');
+      if (lpTimer === 'fired') { lpTimer = null; return; }
+      clearTimeout(lpTimer);
+      lpTimer = null;
+    });
+    folderRow.addEventListener('touchmove', () => {
+      if (lpTimer !== 'fired') { clearTimeout(lpTimer); lpTimer = null; }
+    });
+    folderRow.addEventListener('touchcancel', () => {
+      document.body.classList.remove('no-select');
+      if (lpTimer !== 'fired') { clearTimeout(lpTimer); lpTimer = null; }
+    });
+
+    libraryList.appendChild(folderRow);
+
+    // フォルダ内の文書リスト
+    const childrenDiv = document.createElement('div');
+    childrenDiv.className = 'library-folder-children' + (isOpen ? ' open' : '');
+    if (folderDocs.length === 0 && isOpen) {
+      const emptyMsg = document.createElement('div');
+      emptyMsg.className = 'library-empty';
+      emptyMsg.style.padding = '12px 44px';
+      emptyMsg.style.fontSize = '12px';
+      emptyMsg.textContent = 'フォルダ内に文書はありません';
+      childrenDiv.appendChild(emptyMsg);
+    } else {
+      folderDocs.forEach(doc => {
+        childrenDiv.appendChild(createDocItemEl(doc));
+      });
+    }
+    libraryList.appendChild(childrenDiv);
+  });
+
+  // --- フォルダ未所属の文書 ---
+  if (looseDocs.length > 0 && folders.length > 0) {
+    const label = document.createElement('div');
+    label.className = 'library-section-label';
+    label.textContent = 'フォルダなし';
+    libraryList.appendChild(label);
+  }
+
+  looseDocs.forEach(doc => {
+    libraryList.appendChild(createDocItemEl(doc));
+  });
+}
+
+async function openDocFromLibrary(id) {
+  const existingTab = findTabByDocId(id);
+  if (existingTab) {
+    switchTab(existingTab.tabId);
+    closeLibrary();
+    showToast('タブを切り替えました');
+    return;
+  }
+
+  try {
+    const doc = await getDoc(id);
+    if (!doc) { showToast('文書が見つかりません'); return; }
+
+    const activeTab = getActiveTab();
+    if (App.tabs.length === 1 && activeTab && activeTab.docId === null && activeTab.content.trim() === '') {
+      activeTab.docId = doc.id;
+      activeTab.docName = doc.name;
+      activeTab.content = doc.content;
+      activeTab.isDirty = false;
+      editor.value = doc.content;
+      updateDocNameDisplay();
+      updateCharCount();
+      saveUndoState();
+      autosave();
+      closeLibrary();
+      showToast('「' + doc.name + '」を開きました');
+      return;
+    }
+
+    createTab(doc.id, doc.name, doc.content);
+    saveUndoState();
+    autosave();
+    closeLibrary();
+    showToast('「' + doc.name + '」を開きました');
+  } catch (e) {
+    showToast('文書を開けませんでした');
+    console.error('Library open doc error:', e);
+  }
+}
+
+$('menuLibrary').addEventListener('click', () => {
+  closeMenu();
+  openLibrary();
+});
+
+// --- フォルダ追加ボタン ---
+$('btnAddFolder').addEventListener('click', async () => {
+  const name = await showNameDialog('フォルダ名を入力', '');
+  if (!name) return;
+  try {
+    await saveNewFolder(name);
+    showToast('フォルダ「' + name + '」を作成しました');
+    renderLibrary();
+  } catch (e) {
+    showToast('フォルダの作成に失敗しました');
+    console.error('Create folder error:', e);
+  }
+});
+
+// --- フォルダ長押しポップアップ ---
+const libPopupOverlay = $('libPopupOverlay');
+const libPopup        = $('libPopup');
+
+function showFolderPopup(folder, x, y) {
+  libPopup.innerHTML = '';
+
+  const actions = [
+    { label: 'フォルダ名変更', action: () => renameFolderAction(folder) },
+    { label: '複製',           action: () => duplicateFolderAction(folder) },
+    { label: '削除', danger: true, action: () => deleteFolderAction(folder) },
+  ];
+
+  actions.forEach(a => {
+    const btn = document.createElement('button');
+    btn.className = 'lib-popup-item' + (a.danger ? ' danger' : '');
+    btn.textContent = a.label;
+    btn.addEventListener('click', () => {
+      closePopup();
+      a.action();
+    });
+    libPopup.appendChild(btn);
+  });
+
+  // ポップアップ位置の調整
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const popupW = 160;
+  const popupH = actions.length * 45;
+
+  let left = x - popupW / 2;
+  let top = y - popupH - 10;
+
+  // 画面外にはみ出さないように調整
+  if (left < 8) left = 8;
+  if (left + popupW > vw - 8) left = vw - popupW - 8;
+  if (top < 8) top = y + 10;  // 上に収まらなければ下に表示
+
+  libPopup.style.left = left + 'px';
+  libPopup.style.top  = top + 'px';
+
+  libPopupOverlay.classList.add('active');
+}
+
+function closePopup() {
+  libPopupOverlay.classList.remove('active');
+  document.body.classList.remove('no-select');
+  window.getSelection().removeAllRanges();
+}
+
+libPopupOverlay.addEventListener('click', (e) => {
+  if (e.target === libPopupOverlay) closePopup();
+});
+
+// --- ポップアップのアクション ---
+async function renameFolderAction(folder) {
+  const newName = await showNameDialog('フォルダ名を変更', folder.name);
+  if (!newName) return;
+  try {
+    await updateFolder(folder.id, { name: newName });
+    showToast('フォルダ名を変更しました');
+    renderLibrary();
+  } catch (e) {
+    showToast('名前変更に失敗しました');
+    console.error('Rename folder error:', e);
+  }
+}
+
+async function duplicateFolderAction(folder) {
+  try {
+    const newFolder = await duplicateFolder(folder.id);
+    showToast('フォルダ「' + newFolder.name + '」を作成しました');
+    renderLibrary();
+  } catch (e) {
+    showToast('フォルダの複製に失敗しました');
+    console.error('Duplicate folder error:', e);
+  }
+}
+
+async function deleteFolderAction(folder) {
+  // フォルダ内の文書数を確認
+  const docs = await getAllDocs();
+  const folderDocs = docs.filter(d => d.folderId === folder.id);
+
+  let bodyText = 'フォルダ「' + folder.name + '」を削除します。';
+  if (folderDocs.length > 0) {
+    bodyText += '\n中の文書（' + folderDocs.length + ' 件）はフォルダから取り出されます（文書自体は削除されません）。';
+  }
+
+  showLibConfirm(
+    'フォルダを削除しますか？',
+    bodyText,
+    '削除',
+    async () => {
+      try {
+        await detachDocsFromFolder(folder.id);
+        await deleteFolder(folder.id);
+        delete FolderOpenState[folder.id];
+        showToast('フォルダを削除しました');
+        renderLibrary();
+      } catch (e) {
+        showToast('削除に失敗しました');
+        console.error('Delete folder error:', e);
+      }
+    }
+  );
+}
+
+// --- 汎用確認ダイアログ ---
+function showLibConfirm(title, body, okLabel, onOk) {
+  const overlay = $('libConfirmOverlay');
+  $('libConfirmTitle').textContent = title;
+  $('libConfirmBody').textContent = body;
+  $('libConfirmOk').textContent = okLabel || '削除';
+  overlay.classList.add('active');
+
+  function cleanup() {
+    overlay.classList.remove('active');
+    $('libConfirmCancel').removeEventListener('click', onCancel);
+    $('libConfirmOk').removeEventListener('click', onConfirm);
+    overlay.removeEventListener('click', onBgClick);
+  }
+  function onCancel() { cleanup(); }
+  function onConfirm() { cleanup(); onOk(); }
+  function onBgClick(e) { if (e.target === overlay) cleanup(); }
+
+  $('libConfirmCancel').addEventListener('click', onCancel);
+  $('libConfirmOk').addEventListener('click', onConfirm);
+  overlay.addEventListener('click', onBgClick);
+}
+
+// --- 文書長押しポップアップ ---
+function showDocPopup(doc, x, y) {
+  libPopup.innerHTML = '';
+
+  const actions = [
+    { label: 'ファイル名変更', action: () => renameDocAction(doc) },
+    { label: '複製',           action: () => duplicateDocAction(doc) },
+    { label: 'ファイルを移動', action: () => moveDocToFolderAction(doc) },
+    { label: '削除', danger: true, action: () => deleteDocAction(doc) },
+  ];
+
+  actions.forEach(a => {
+    const btn = document.createElement('button');
+    btn.className = 'lib-popup-item' + (a.danger ? ' danger' : '');
+    btn.textContent = a.label;
+    btn.addEventListener('click', () => {
+      closePopup();
+      a.action();
+    });
+    libPopup.appendChild(btn);
+  });
+
+  // ポップアップ位置の調整
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const popupW = 160;
+  const popupH = actions.length * 45;
+
+  let left = x - popupW / 2;
+  let top = y - popupH - 10;
+
+  if (left < 8) left = 8;
+  if (left + popupW > vw - 8) left = vw - popupW - 8;
+  if (top < 8) top = y + 10;
+
+  libPopup.style.left = left + 'px';
+  libPopup.style.top  = top + 'px';
+
+  libPopupOverlay.classList.add('active');
+}
+
+// --- 文書ポップアップのアクション ---
+async function renameDocAction(doc) {
+  const newName = await showNameDialog('ファイル名を変更', doc.name);
+  if (!newName) return;
+  try {
+    await updateDoc(doc.id, { name: newName });
+    // 開いているタブにも反映
+    const tab = findTabByDocId(doc.id);
+    if (tab) {
+      tab.docName = newName;
+      if (tab.tabId === App.activeTabId) updateDocNameDisplay();
+      autosave();
+    }
+    showToast('ファイル名を変更しました');
+    renderLibrary();
+  } catch (e) {
+    showToast('名前変更に失敗しました');
+    console.error('Rename doc error:', e);
+  }
+}
+
+async function duplicateDocAction(doc) {
+  try {
+    const srcDoc = await getDoc(doc.id);
+    if (!srcDoc) { showToast('文書が見つかりません'); return; }
+    const newName = srcDoc.name + ' (コピー)';
+    const newDoc = await saveNewDoc(newName, srcDoc.content);
+    // 元の文書がフォルダ内ならコピーも同じフォルダに入れる
+    if (srcDoc.folderId) {
+      await updateDoc(newDoc.id, { folderId: srcDoc.folderId });
+    }
+    showToast('「' + newName + '」を作成しました');
+    renderLibrary();
+  } catch (e) {
+    showToast('複製に失敗しました');
+    console.error('Duplicate doc error:', e);
+  }
+}
+
+async function moveDocToFolderAction(doc) {
+  try {
+    const folders = await getAllFolders();
+    if (folders.length === 0 && !doc.folderId) {
+      showToast('フォルダがありません。先にフォルダを作成してください');
+      return;
+    }
+    showFolderSelectModal(doc, folders);
+  } catch (e) {
+    showToast('フォルダ情報の取得に失敗しました');
+    console.error('Move doc error:', e);
+  }
+}
+
+async function deleteDocAction(doc) {
+  showLibConfirm(
+    '文書を削除しますか？',
+    '「' + (doc.name || '無題') + '」を削除します。\nこの操作は取り消せません。',
+    '削除',
+    async () => {
+      try {
+        // 開いているタブがあれば閉じる
+        const tab = findTabByDocId(doc.id);
+        if (tab) {
+          tab.isDirty = false;
+          closeTab(tab.tabId);
+        }
+        await deleteDoc(doc.id);
+        showToast('文書を削除しました');
+        renderLibrary();
+      } catch (e) {
+        showToast('削除に失敗しました');
+        console.error('Delete doc error:', e);
+      }
+    }
+  );
+}
+
+// --- フォルダ移動モーダル ---
+function showFolderSelectModal(doc, folders) {
+  const overlay = $('folderSelectOverlay');
+  const list = $('folderSelectList');
+  const cancelBtn = $('folderSelectCancel');
+  list.innerHTML = '';
+
+  function cleanup() {
+    overlay.classList.remove('active');
+    overlay.removeEventListener('click', onBgClick);
+    cancelBtn.removeEventListener('click', onCancel);
+  }
+  function onBgClick(e) { if (e.target === overlay) cleanup(); }
+  function onCancel() { cleanup(); }
+  overlay.addEventListener('click', onBgClick);
+  cancelBtn.addEventListener('click', onCancel);
+
+  // フォルダ一覧ボタン
+  folders.forEach(folder => {
+    const btn = document.createElement('button');
+    btn.className = 'folder-select-item';
+    // 現在所属中なら印を付ける
+    if (doc.folderId === folder.id) {
+      btn.classList.add('current');
+    }
+    const folderIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333333" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+    btn.innerHTML = '<span class="folder-select-icon">' + folderIcon + '</span><span class="folder-select-name">' +
+      escapeHtml(folder.name) + '</span>' +
+      (doc.folderId === folder.id ? '<span class="folder-select-check">✓</span>' : '');
+    btn.addEventListener('click', async () => {
+      cleanup();
+      if (doc.folderId === folder.id) {
+        showToast('既にこのフォルダ内です');
+        return;
+      }
+      try {
+        await updateDoc(doc.id, { folderId: folder.id });
+        showToast('「' + folder.name + '」に移動しました');
+        renderLibrary();
+      } catch (e) {
+        showToast('移動に失敗しました');
+        console.error('Move doc error:', e);
+      }
+    });
+    list.appendChild(btn);
+  });
+
+  // 「フォルダから取り出す」ボタン
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'folder-select-item folder-select-remove';
+  const docIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#333333" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+  removeBtn.innerHTML = '<span class="folder-select-icon">' + docIcon + '</span><span class="folder-select-name">フォルダから取り出す</span>';
+  if (!doc.folderId) {
+    removeBtn.disabled = true;
+    removeBtn.style.opacity = '0.4';
+  }
+  removeBtn.addEventListener('click', async () => {
+    cleanup();
+    if (!doc.folderId) {
+      showToast('フォルダに所属していません');
+      return;
+    }
+    try {
+      await updateDoc(doc.id, { folderId: null });
+      showToast('フォルダから取り出しました');
+      renderLibrary();
+    } catch (e) {
+      showToast('移動に失敗しました');
+      console.error('Remove from folder error:', e);
+    }
+  });
+  list.appendChild(removeBtn);
+
+  overlay.classList.add('active');
+}
+
+
+// ══════════════ #TABPANEL タブパネル（右スライド・タブ切替・タブ閉じ） ══════════════
+
+const tabOverlay    = $('tabOverlay');
+const tabPanel      = $('tabPanel');
+const tabList       = $('tabList');
+const tabPanelCount = $('tabPanelCount');
+
+function openTabPanel() {
+  saveCurrentTabState();
+  renderTabList();
+  tabOverlay.classList.add('active');
+  tabPanel.classList.add('active');
+}
+
+function closeTabPanel() {
+  tabPanel.classList.remove('active');
+  tabOverlay.classList.remove('active');
+}
+
+tabOverlay.addEventListener('click', closeTabPanel);
+
+// 未保存確認ダイアログを表示してからタブを閉じる
+function showCloseTabDialog(tabId) {
+  const overlay = $('closeTabOverlay');
+  overlay.classList.add('active');
+
+  function cleanup() {
+    overlay.classList.remove('active');
+    $('btnCloseTabCancel').removeEventListener('click', onCancel);
+    $('btnCloseTabSave').removeEventListener('click', onSave);
+    $('btnCloseTabConfirm').removeEventListener('click', onConfirm);
+    overlay.removeEventListener('click', onBgClick);
+  }
+  function onCancel() { cleanup(); }
+  function onSave() {
+    cleanup();
+    const tab = App.tabs.find(t => t.tabId === tabId);
+    if (!tab) return;
+    const name = tab.docName && tab.docName.trim() ? tab.docName : '無題';
+    const content = tab.content;
+    if (tab.docId !== null) {
+      // 既存文書：上書き更新
+      updateDoc(tab.docId, { name, content }).then(() => {
+        tab.isDirty = false;
+        closeTab(tabId);
+        renderTabList();
+        showToast('保存して閉じました');
+      }).catch(() => {
+        showToast('保存に失敗しました');
+      });
+    } else {
+      // 新規文書：新しく保存
+      saveNewDoc(name, content).then((doc) => {
+        tab.docId = doc.id;
+        tab.docName = doc.name;
+        tab.isDirty = false;
+        closeTab(tabId);
+        renderTabList();
+        showToast('保存して閉じました');
+      }).catch(() => {
+        showToast('保存に失敗しました');
+      });
+    }
+  }
+  function onConfirm() {
+    cleanup();
+    const tab = App.tabs.find(t => t.tabId === tabId);
+    if (tab) tab.isDirty = false; // 警告をスキップして閉じる
+    closeTab(tabId);
+    renderTabList();
+  }
+  function onBgClick(e) { if (e.target === overlay) cleanup(); }
+
+  $('btnCloseTabCancel').addEventListener('click', onCancel);
+  $('btnCloseTabSave').addEventListener('click', onSave);
+  $('btnCloseTabConfirm').addEventListener('click', onConfirm);
+  overlay.addEventListener('click', onBgClick);
+}
+
+function renderTabList() {
+  tabList.innerHTML = '';
+  tabPanelCount.textContent = App.tabs.length + ' 個';
+
+  if (App.tabs.length === 0) {
+    tabList.innerHTML = '<div class="tab-empty">タブがありません</div>';
+    return;
+  }
+
+  App.tabs.forEach(tab => {
+    const item = document.createElement('div');
+    item.className = 'tab-item' + (tab.tabId === App.activeTabId ? ' active-tab' : '');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'tab-item-name';
+    nameSpan.textContent = tab.docName || '無題';
+
+    // 長押し検出
+    let longPressTimer = null;
+    let longPressFired = false;
+    nameSpan.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+    nameSpan.addEventListener('touchstart', (e) => {
+      longPressFired = false;
+      document.body.classList.add('no-select');
+      longPressTimer = setTimeout(() => {
+        longPressFired = true;
+        longPressTimer = null;
+        window.getSelection().removeAllRanges();
+        showToastAt(tab.docName || '無題', nameSpan);
+        requestAnimationFrame(() => { window.getSelection().removeAllRanges(); });
+      }, 500);
+    }, { passive: false });
+    nameSpan.addEventListener('touchend', () => {
+      document.body.classList.remove('no-select');
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    });
+    nameSpan.addEventListener('touchmove', () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    });
+    nameSpan.addEventListener('touchcancel', () => {
+      document.body.classList.remove('no-select');
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    });
+
+    nameSpan.addEventListener('click', () => {
+      if (longPressFired) { longPressFired = false; return; }
+      if (tab.tabId !== App.activeTabId) switchTab(tab.tabId);
+      closeTabPanel();
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tab-item-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'タブを閉じる';
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // アクティブタブの場合は最新状態を同期してからチェック
+      if (tab.tabId === App.activeTabId) saveCurrentTabState();
+      if (isTabUnsaved(tab)) {
+        showCloseTabDialog(tab.tabId);
+      } else {
+        closeTab(tab.tabId);
+        renderTabList();
+      }
+    });
+
+    item.appendChild(nameSpan);
+    item.appendChild(closeBtn);
+    tabList.appendChild(item);
+  });
+}
+
+
+// ══════════════ #SWIPE スワイプでメニュー・タブパネル開閉 ══════════════
+
+function setupSwipeMenu() {
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+  let isHorizontal = null;
+  let swipeTarget = null;  // 'menu' or 'tab' or 'library'
+
+  const THRESHOLD = 50;
+
+  function setTrackingMenu(x) {
+    menuPanel.style.transition = 'none';
+    const pw = menuPanel.offsetWidth;
+    menuPanel.style.transform = `translateX(${Math.min(0, Math.max(-pw, x))}px)`;
+  }
+
+  function setTrackingTab(x) {
+    tabPanel.style.transition = 'none';
+    const pw = tabPanel.offsetWidth;
+    tabPanel.style.transform = `translateX(${Math.max(0, Math.min(pw, x))}px)`;
+  }
+
+  function setTrackingLibrary(x) {
+    libraryPanel.style.transition = 'none';
+    const pw = libraryPanel.offsetWidth;
+    libraryPanel.style.transform = `translateX(${Math.min(0, Math.max(-pw, x))}px)`;
+  }
+
+  function settleMenu(open) {
+    menuPanel.style.transition = '';
+    menuPanel.style.transform = '';
+    open ? openMenu() : closeMenu();
+  }
+
+  function settleTab(open) {
+    tabPanel.style.transition = 'none';
+    tabPanel.style.transform = '';
+    open ? openTabPanel() : closeTabPanel();
+  }
+
+  function settleLibrary(open) {
+    libraryPanel.style.transition = '';
+    libraryPanel.style.transform = '';
+    if (open) {
+      openLibrary();
+    } else {
+      closeLibrary();
+      openMenu();
+    }
+  }
+
+  document.addEventListener('touchstart', (e) => {
+    // モーダル・ダイアログが開いている間はスワイプ無効
+    if (
+      $('leaveOverlay').classList.contains('active') ||
+      $('closeTabOverlay').classList.contains('active') ||
+      $('nameDialogOverlay').classList.contains('active') ||
+      $('libPopupOverlay').classList.contains('active') ||
+      $('libConfirmOverlay').classList.contains('active') ||
+      $('folderSelectOverlay').classList.contains('active') ||
+      $('renameModal').classList.contains('active')
+    ) {
+      tracking = false;
+      return;
+    }
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    isHorizontal = null;
+    tracking = false;
+    swipeTarget = null;
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+
+    if (isHorizontal === null) {
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 20) {
+        isHorizontal = true;
+      } else if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 20) {
+        isHorizontal = false;
+      } else {
+        return;
+      }
+    }
+
+    if (!isHorizontal) return;
+
+    const menuIsOpen    = menuPanel.classList.contains('active');
+    const tabIsOpen     = tabPanel.classList.contains('active');
+    const libraryIsOpen = libraryPanel.classList.contains('active');
+
+    if (swipeTarget === null) {
+      if (libraryIsOpen && dx < 0) {
+        swipeTarget = 'library';
+      } else if (!menuIsOpen && !tabIsOpen && !libraryIsOpen) {
+        swipeTarget = dx > 0 ? 'menu' : 'tab';
+      } else if (menuIsOpen && dx < 0) {
+        swipeTarget = 'menu';
+      } else if (tabIsOpen && dx > 0) {
+        swipeTarget = 'tab';
+      } else {
+        return;
+      }
+    }
+
+    e.preventDefault();
+    tracking = true;
+
+    if (swipeTarget === 'menu') {
+      const menuWidth = menuPanel.offsetWidth;
+      if (!menuIsOpen && dx > 0) {
+        setTrackingMenu(Math.min(0, -menuWidth + dx));
+      } else if (menuIsOpen && dx < 0) {
+        setTrackingMenu(Math.max(-menuWidth, dx));
+      }
+    } else if (swipeTarget === 'tab') {
+      const tabWidth = tabPanel.offsetWidth;
+      if (!tabIsOpen && dx < 0) {
+        setTrackingTab(Math.max(0, tabWidth + dx));
+      } else if (tabIsOpen && dx > 0) {
+        setTrackingTab(Math.min(tabWidth, dx));
+      }
+    } else if (swipeTarget === 'library') {
+      const libWidth = libraryPanel.offsetWidth;
+      if (libraryIsOpen && dx < 0) {
+        setTrackingLibrary(Math.max(-libWidth, dx));
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+
+    // 縦移動が横移動の半分以上あればスクロールとみなしてキャンセル
+    if (Math.abs(dy) > Math.abs(dx) * 0.5) {
+      // パネルが追従している場合は元の状態に戻す
+      if (swipeTarget === 'menu') settleMenu(menuPanel.classList.contains('active'));
+      else if (swipeTarget === 'tab') settleTab(tabPanel.classList.contains('active'));
+      else if (swipeTarget === 'library') settleLibrary(libraryPanel.classList.contains('active'));
+      swipeTarget = null;
+      return;
+    }
+
+    if (swipeTarget === 'menu') {
+      const menuIsOpen = menuPanel.classList.contains('active');
+      if (!menuIsOpen && dx > THRESHOLD) settleMenu(true);
+      else if (menuIsOpen && dx < -THRESHOLD) settleMenu(false);
+      else settleMenu(menuIsOpen);
+    } else if (swipeTarget === 'tab') {
+      const tabIsOpen = tabPanel.classList.contains('active');
+      if (!tabIsOpen && dx < -THRESHOLD) settleTab(true);
+      else if (tabIsOpen && dx > THRESHOLD) settleTab(false);
+      else settleTab(tabIsOpen);
+    } else if (swipeTarget === 'library') {
+      const libraryIsOpen = libraryPanel.classList.contains('active');
+      if (libraryIsOpen && dx < -THRESHOLD) settleLibrary(false);
+      else settleLibrary(libraryIsOpen);
+    }
+
+    swipeTarget = null;
+  }, { passive: true });
+}
+
+
+// ══════════════ #TEMPLATE テンプレート定義・挿入処理 ══════════════
+
+const TEMPLATES = {
+  'top-anchor': `<p><a id="top"></a></p>`,
+  'title-template': `歌詞考察「◯◯◯」BUCK-TICK 櫻井敦司／長文エッセイ／解釈`,
+  'lead-disclaimer': `ここにリード文を入れる
+
+<div style="border: 1px solid #aaa; padding: 10px;">
+<p>※本記事は、筆者とClaudeの会話によって導き出した、櫻井敦司さんの歌詞についての考察をブログ用に再構成したものです。<br>様々な解釈がある中での一つとしてお読みいただければ幸いです。<br>歌詞本文は著作権保護のため、必要最小限のみ引用しています。</p>
+</div>`,
+  'toc': `<div style="border: 1px solid #aaa; padding: 10px;">
+<p><span style="color: #000000;">「◯◯◯（曲名）」歌詞考察</span></p>
+<p>[:contents]</p>
+</div>`,
+  'font-style': `<style>
+.entry-content p {
+  margin-bottom: 0em;
+  color: #2a2a2a;
+}
+.entry-content li {
+  margin-bottom: 0.8em;
+  color: #2a2a2a;
+}
+</style>`,
+  'end': `\n\nEND\n`,
+  'end-note1': `※以上は、歌詞の要素から導き出した「一つの解釈」として読んでいただければ幸いです。`,
+  'end-note2': `※本文中の歌詞引用
+<b>BUCK-TICK「◯◯◯」</b>
+<b>作詞：櫻井敦司［アルバム『◯◯◯』(20XX) 収録］</b>`,
+  'end-note3': `※本記事の無断転載・コピーはご遠慮ください。紹介や引用の際は、記事へのリンクを添えてください。`,
+  'footer1': `・筆者の考察方法についてはこちらをどうぞ↓
+<a href="https://peg-kousatsu-note.hateblo.jp/entry/2025/kousatsuprocess">【ChatGPTを使用した歌詞考察の方法について】</a>`,
+  'footer2': `・筆者の考察エッセイの作成方法についてはこちらです↓
+<a href="https://peg-kousatsu-note.hateblo.jp/entry/2025/writingprocess">【考察エッセイの作成プロセスについて（ChatGPT使用）】</a>`,
+  'top-button': `<!-- ===== ページトップボタン ===== -->
+<p><a href="#top" style="position: fixed; bottom: 20px; right: 20px; display: inline-block; padding: 10px 12px; background-color: rgba(238,238,238,0.7); color: #333; border-radius: 50%; text-decoration: none; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 1000; transition: background-color 0.2s;">▲</a></p>
+<style>
+  a[href="#top"]:hover {
+    background-color: rgba(238,238,238,0.95);
+  }
+</style>`,
+};
+
+const templateBtn = document.getElementById('templateBtn');
+const tplPopup = document.getElementById('tplPopup');
+
+// カーソル位置を保存（フォーカスが移る前に捕まえる）
+templateBtn.addEventListener('mousedown', saveCursorPos);
+templateBtn.addEventListener('touchstart', saveCursorPos, { passive: true });
+
+templateBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  // 罫線ポップアップが開いていたら閉じる
+  if (hrPopup.classList.contains('open')) {
+    hrPopup.classList.remove('open');
+    removeCursorMarker();
+  }
+  const wasOpen = tplPopup.classList.contains('open');
+  if (wasOpen) {
+    tplPopup.classList.remove('open');
+    removeCursorMarker();
+  } else {
+    const rect = templateBtn.getBoundingClientRect();
+    tplPopup.style.top = (rect.bottom + 4) + 'px';
+    tplPopup.style.left = rect.left + 'px';
+    insertCursorMarker();
+    tplPopup.classList.add('open');
+  }
+});
+
+tplPopup.addEventListener('click', (e) => {
+  const item = e.target.closest('.tpl-popup-item');
+  if (!item) return;
+  const key = item.dataset.tpl;
+  const tpl = TEMPLATES[key];
+  if (tpl) { insertLine(tpl); showToast('テンプレートを挿入しました'); }
+  tplPopup.classList.remove('open');
+});
+
+document.addEventListener('click', () => {
+  const tplWasOpen = tplPopup.classList.contains('open');
+  const hrWasOpen = hrPopup.classList.contains('open');
+  tplPopup.classList.remove('open');
+  hrPopup.classList.remove('open');
+  if (tplWasOpen || hrWasOpen) {
+    removeCursorMarker();
+  }
+});
+
+// ポップアップ操作時にエディタのカーソルを維持する（補助的に残す）
+tplPopup.addEventListener('mousedown', (e) => { e.preventDefault(); });
+hrPopup.addEventListener('mousedown', (e) => { e.preventDefault(); });
+
+
+// ══════════════ #CUSTOMTPL カスタムテンプレート ══════════════
+
+let ctplEditingId = null; // null=新規, 数値=編集中のID
+
+// --- 表示名（タイトルがなければ本文冒頭を表示） ---
+function getCtplDisplayName(tpl) {
+  if (tpl.title && tpl.title.trim()) return tpl.title;
+  const preview = tpl.content.replace(/\n/g, ' ').substring(0, 20);
+  return preview + (tpl.content.length > 20 ? '…' : '');
+}
+
+// --- ソート ---
+function sortCustomTemplates(tpls) {
+  const sorted = [...tpls];
+  switch (App.customTplSort) {
+    case 'date-desc':
+      sorted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      break;
+    case 'date-asc':
+      sorted.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      break;
+    case 'name-asc':
+      sorted.sort((a, b) => getCtplDisplayName(a).localeCompare(getCtplDisplayName(b)));
+      break;
+    case 'name-desc':
+      sorted.sort((a, b) => getCtplDisplayName(b).localeCompare(getCtplDisplayName(a)));
+      break;
+  }
+  return sorted;
+}
+
+// --- グリッド描画 ---
+function renderCtplGrid() {
+  const grid = $('ctplGrid');
+  const sorted = sortCustomTemplates(App.customTemplates);
+
+  if (sorted.length === 0) {
+    grid.innerHTML = '<div class="ctpl-empty">テンプレートがありません</div>';
+    return;
+  }
+
+  grid.innerHTML = sorted.map(tpl => {
+    const name = getCtplDisplayName(tpl);
+    const isSelected = App.selectedCustomTplId === tpl.id;
+    const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="ctpl-item${isSelected ? ' selected' : ''}" data-id="${tpl.id}">${escaped}</div>`;
+  }).join('');
+}
+
+// --- プレビュー更新 ---
+function updateCtplPreview() {
+  const el = $('ctplPreview');
+  if (!App.selectedCustomTplId) {
+    el.textContent = '';
+    return;
+  }
+  const tpl = App.customTemplates.find(t => t.id === App.selectedCustomTplId);
+  el.textContent = tpl ? tpl.content : '';
+}
+
+// --- ボタン状態更新 ---
+function updateCtplButtons() {
+  const has = App.selectedCustomTplId !== null;
+  $('btnCtplInsert').disabled = !has;
+  $('btnCtplEdit').disabled = !has;
+  $('btnCtplDelete').disabled = !has;
+}
+
+// --- モーダル開閉 ---
+async function openCustomTplModal() {
+  try {
+    App.customTemplates = await getAllCustomTemplates();
+  } catch (e) {
+    App.customTemplates = [];
+  }
+  App.selectedCustomTplId = null;
+  ctplEditingId = null;
+  $('ctplListView').style.display = '';
+  $('ctplEditView').style.display = 'none';
+  $('ctplSortSelect').value = App.customTplSort;
+  renderCtplGrid();
+  updateCtplPreview();
+  updateCtplButtons();
+  insertCursorMarker();
+  $('ctplNoNewline').checked = false;    // ← 追加
+  $('customTplModal').classList.add('active');
+}
+
+function closeCustomTplModal() {
+  $('customTplModal').classList.remove('active');
+  removeCursorMarker();
+}
+
+// --- グリッドタップ（選択） ---
+$('ctplGrid').addEventListener('click', (e) => {
+  const item = e.target.closest('.ctpl-item');
+  if (!item) return;
+  const id = Number(item.dataset.id);
+  // 同じアイテムをタップしたら選択解除
+  if (App.selectedCustomTplId === id) {
+    App.selectedCustomTplId = null;
+  } else {
+    App.selectedCustomTplId = id;
+  }
+  renderCtplGrid();
+  updateCtplPreview();
+  updateCtplButtons();
+});
+
+// --- 挿入 ---
+$('btnCtplInsert').addEventListener('click', () => {
+  if (!App.selectedCustomTplId) return;
+  const tpl = App.customTemplates.find(t => t.id === App.selectedCustomTplId);
+  if (!tpl) return;
+  const noNewline = $('ctplNoNewline').checked;
+  $('customTplModal').classList.remove('active');
+  setTimeout(() => {
+    insertLine(tpl.content, noNewline);
+    showToast('テンプレートを挿入しました');
+  }, 50);
+});
+
+// --- 新規作成（フォーム切り替え） ---
+$('btnCtplNew').addEventListener('click', () => {
+  ctplEditingId = null;
+  $('ctplEditTitle').textContent = '新規作成';
+  $('ctplTitleInput').value = '';
+  $('ctplContentInput').value = '';
+  $('ctplListView').style.display = 'none';
+  $('ctplEditView').style.display = '';
+  setTimeout(() => $('ctplContentInput').focus(), 100);
+});
+
+// --- 編集（フォーム切り替え） ---
+$('btnCtplEdit').addEventListener('click', () => {
+  if (!App.selectedCustomTplId) return;
+  const tpl = App.customTemplates.find(t => t.id === App.selectedCustomTplId);
+  if (!tpl) return;
+  ctplEditingId = tpl.id;
+  $('ctplEditTitle').textContent = '編集';
+  $('ctplTitleInput').value = tpl.title || '';
+  $('ctplContentInput').value = tpl.content;
+  $('ctplListView').style.display = 'none';
+  $('ctplEditView').style.display = '';
+  setTimeout(() => $('ctplContentInput').focus(), 100);
+});
+
+// --- 削除 ---
+$('btnCtplDelete').addEventListener('click', async () => {
+  if (!App.selectedCustomTplId) return;
+  const tpl = App.customTemplates.find(t => t.id === App.selectedCustomTplId);
+  if (!tpl) return;
+  const name = getCtplDisplayName(tpl);
+  if (!confirm(`「${name}」を削除しますか？`)) return;
+  try {
+    await deleteCustomTemplate(tpl.id);
+    App.customTemplates = App.customTemplates.filter(t => t.id !== tpl.id);
+    App.selectedCustomTplId = null;
+    renderCtplGrid();
+    updateCtplPreview();
+    updateCtplButtons();
+    showToast('テンプレートを削除しました');
+  } catch (e) {
+    showToast('削除に失敗しました');
+  }
+});
+
+// --- 保存（新規 or 更新） ---
+$('btnCtplSave').addEventListener('click', async () => {
+  const content = $('ctplContentInput').value;
+  if (!content.trim()) {
+    showToast('内容を入力してください');
+    return;
+  }
+  const title = $('ctplTitleInput').value.trim();
+  try {
+    if (ctplEditingId === null) {
+      const tpl = await saveNewCustomTemplate(title, content);
+      App.customTemplates.push(tpl);
+      App.selectedCustomTplId = tpl.id;
+      showToast('テンプレートを作成しました');
+    } else {
+      const updated = await updateCustomTemplate(ctplEditingId, { title, content });
+      const idx = App.customTemplates.findIndex(t => t.id === ctplEditingId);
+      if (idx !== -1) App.customTemplates[idx] = updated;
+      showToast('テンプレートを更新しました');
+    }
+    $('ctplListView').style.display = '';
+    $('ctplEditView').style.display = 'none';
+    renderCtplGrid();
+    updateCtplPreview();
+    updateCtplButtons();
+  } catch (e) {
+    showToast('保存に失敗しました');
+  }
+});
+
+// --- 編集キャンセル（一覧に戻る） ---
+$('btnCtplEditCancel').addEventListener('click', () => {
+  $('ctplListView').style.display = '';
+  $('ctplEditView').style.display = 'none';
+});
+
+// --- 編集ビューの✕（一覧に戻る） ---
+$('btnCloseCtplEdit').addEventListener('click', () => {
+  $('ctplListView').style.display = '';
+  $('ctplEditView').style.display = 'none';
+});
+
+// --- 一覧ビューの✕（モーダルを閉じる） ---
+$('btnCloseCtpl').addEventListener('click', closeCustomTplModal);
+
+// --- オーバーレイタップで閉じる ---
+$('customTplModal').addEventListener('click', (e) => {
+  if (e.target === $('customTplModal')) closeCustomTplModal();
+});
+
+// --- ソート切り替え ---
+$('ctplSortSelect').addEventListener('change', (e) => {
+  App.customTplSort = e.target.value;
+  renderCtplGrid();
+});
+
+// --- ツールバーボタン ---
+// カーソル位置を保存（フォーカスが移る前に捕まえる）
+$('btnCustomTpl').addEventListener('mousedown', saveCursorPos);
+$('btnCustomTpl').addEventListener('touchstart', saveCursorPos, { passive: true });
+
+$('btnCustomTpl').addEventListener('click', () => {
+  // 他のポップアップが開いていたら閉じる
+  if (tplPopup.classList.contains('open')) {
+    tplPopup.classList.remove('open');
+    removeCursorMarker();
+  }
+  if (hrPopup.classList.contains('open')) {
+    hrPopup.classList.remove('open');
+    removeCursorMarker();
+  }
+  openCustomTplModal();
+});
+
+// カスタムテンプレートモーダル操作時にエディタのカーソルを維持する
+// （INPUT / TEXTAREA / SELECT は除外し、編集ビューでの入力を妨げない）
+$('customTplModal').addEventListener('mousedown', (e) => {
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  e.preventDefault();
+});
+
+
+// ══════════════ #CONVERT テキスト → HTML変換エンジン ══════════════
+
+function convertToHtml(text) {
+  const lines = text.split('\n');
+  const output = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === '') {
+      let emptyCount = 0;
+      while (i < lines.length && lines[i].trim() === '') { emptyCount++; i++; }
+      if (emptyCount >= 2) {
+        for (let e = 0; e < emptyCount - 1; e++) output.push('<p> </p>');
+      }
+      continue;
+    }
+
+    if (isHtmlBlock(trimmed)) {
+      const blockResult = collectHtmlBlock(lines, i);
+      output.push(blockResult.html);
+      i = blockResult.nextIndex;
+      continue;
+    }
+
+    if (/^-{3,}$/.test(trimmed)) { output.push('<hr>'); i++; continue; }
+
+    if (trimmed.startsWith('- ')) {
+      const listItems = [];
+      while (i < lines.length && lines[i].trim().startsWith('- ')) {
+        listItems.push(convertInline(lines[i].trim().substring(2)));
+        i++;
+      }
+      output.push('<ul>');
+      listItems.forEach(item => output.push('<li>' + item + '</li>'));
+      output.push('</ul>');
+      continue;
+    }
+
+    if (trimmed.startsWith('> ')) {
+      const quoteLines = [];
+      while (i < lines.length && lines[i].trim().startsWith('> ')) {
+        quoteLines.push(convertInline(lines[i].trim().substring(2)));
+        i++;
+      }
+      output.push('<blockquote>');
+      output.push('<p>' + quoteLines.join('<br>') + '</p>');
+      output.push('</blockquote>');
+      continue;
+    }
+
+    const paraLines = [];
+    while (i < lines.length) {
+      const cl = lines[i];
+      const ct = cl.trim();
+      if (ct === '' || isHtmlBlock(ct) || ct.startsWith('- ') || ct.startsWith('> ') || /^-{3,}$/.test(ct)) break;
+      paraLines.push(convertInline(ct));
+      i++;
+    }
+    if (paraLines.length > 0) output.push('<p>' + paraLines.join('<br>') + '</p>');
+  }
+
+  return output.join('\n');
+}
+
+function isHtmlBlock(line) {
+  const blockStarts = [
+    '<h3', '<h4', '<h5', '<h6', '<hr', '<div', '</div', '<ul', '</ul',
+    '<ol', '</ol', '<li', '<blockquote', '</blockquote', '<table',
+    '<p><a id=', '<p><a href=', '<style', '</style', '<!--',
+    '<p><span', '<a href='
+  ];
+  const lower = line.toLowerCase();
+  return blockStarts.some(tag => lower.startsWith(tag));
+}
+
+function collectHtmlBlock(lines, startIndex) {
+  const line = lines[startIndex].trim();
+  const lower = line.toLowerCase();
+
+  if (lower.startsWith('<hr') || lower.startsWith('<!--') && line.includes('-->')) {
+    return { html: line, nextIndex: startIndex + 1 };
+  }
+
+  const multiLineTags = ['div', 'style'];
+  for (const tag of multiLineTags) {
+    if (lower.startsWith('<' + tag)) {
+      const collected = [line];
+      let j = startIndex + 1;
+      const closeTag = '</' + tag + '>';
+      if (line.toLowerCase().includes(closeTag)) return { html: line, nextIndex: startIndex + 1 };
+      while (j < lines.length) {
+        collected.push(lines[j]);
+        if (lines[j].toLowerCase().includes(closeTag)) return { html: collected.join('\n'), nextIndex: j + 1 };
+        j++;
+      }
+      return { html: collected.join('\n'), nextIndex: j };
+    }
+  }
+
+  if (lower.startsWith('<!--')) {
+    const collected = [line];
+    let j = startIndex + 1;
+    if (line.includes('-->')) return { html: line, nextIndex: startIndex + 1 };
+    while (j < lines.length) {
+      collected.push(lines[j]);
+      if (lines[j].includes('-->')) return { html: collected.join('\n'), nextIndex: j + 1 };
+      j++;
+    }
+    return { html: collected.join('\n'), nextIndex: j };
+  }
+
+  return { html: line, nextIndex: startIndex + 1 };
+}
+
+function convertInline(text) {
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return text;
+}
+
+
+// ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════
+
+let previewLongPressTimer = null;
+
+btnPreview.addEventListener('click', () => {
+  App.isPreview ? closePreview() : openPreview();
+});
+
+btnPreview.addEventListener('touchstart', (e) => {
+  previewLongPressTimer = setTimeout(() => {
+    previewLongPressTimer = 'fired';
+    togglePreviewMode();
+  }, 500);
+}, { passive: true });
+
+btnPreview.addEventListener('touchend', () => {
+  if (previewLongPressTimer === 'fired') { previewLongPressTimer = null; return; }
+  clearTimeout(previewLongPressTimer);
+  previewLongPressTimer = null;
+});
+
+btnPreview.addEventListener('touchcancel', () => {
+  clearTimeout(previewLongPressTimer);
+  previewLongPressTimer = null;
+});
+
+function togglePreviewMode() {
+  App.previewMode = App.previewMode === 'html' ? 'md' : 'html';
+  const label = App.previewMode === 'html' ? 'HTMLプレビュー' : 'MDプレビュー';
+  previewModeLabel.textContent = label;
+  showToast(label + 'に切替');
+  if (App.isPreview) renderPreview();
+}
+
+function openPreview() {
+  App.isPreview = true;
+  renderPreview();
+  editor.style.display = 'none';
+  preview.classList.add('active');
+  previewIndicator.classList.add('active');
+  btnPreview.textContent = '◀';
+  document.getElementById('toolbar').style.display = 'none';
+  btnUndo.style.display = 'none';
+  btnRedo.style.display = 'none';
+  history.pushState({ preview: true }, '');
+}
+
+function closePreview() {
+  App.isPreview = false;
+  editor.style.display = '';
+  preview.classList.remove('active');
+  previewIndicator.classList.remove('active');
+  btnPreview.textContent = '▶';
+  document.getElementById('toolbar').style.display = '';
+  btnUndo.style.display = '';
+  btnRedo.style.display = '';
+}
+
+function renderPreview() {
+  const text = editor.value;
+  if (App.previewMode === 'html') {
+    preview.innerHTML = convertToHtml(text);
+  } else {
+    preview.innerHTML = renderMarkdownPreview(text);
+  }
+}
+
+function renderMarkdownPreview(text) {
+  const lines = text.split('\n');
+  const output = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === '') {
+      let emptyCount = 0;
+      while (i < lines.length && lines[i].trim() === '') { emptyCount++; i++; }
+      i--;
+      if (emptyCount >= 2) {
+        for (let e = 0; e < emptyCount - 1; e++) output.push('<p class="spacer">&nbsp;</p>');
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith('<')) {
+      output.push('<pre><code>' + escapeHtml(trimmed) + '</code></pre>');
+      continue;
+    }
+
+    if (trimmed.startsWith('### ')) { output.push('<h3>' + convertInlineForMd(trimmed.substring(4)) + '</h3>'); continue; }
+    if (trimmed.startsWith('## '))  { output.push('<h3>' + convertInlineForMd(trimmed.substring(3)) + '</h3>'); continue; }
+    if (/^-{3,}$/.test(trimmed))    { output.push('<hr>'); continue; }
+
+    if (trimmed.startsWith('- ')) {
+      const items = [];
+      while (i < lines.length && lines[i].trim().startsWith('- ')) { items.push(convertInlineForMd(lines[i].trim().substring(2))); i++; }
+      i--;
+      output.push('<ul>' + items.map(it => '<li>' + it + '</li>').join('') + '</ul>');
+      continue;
+    }
+
+    if (trimmed.startsWith('> ')) {
+      output.push('<blockquote><p>' + convertInlineForMd(trimmed.substring(2)) + '</p></blockquote>');
+      continue;
+    }
+
+    const paraLines = [];
+    while (i < lines.length) {
+      const ct = lines[i].trim();
+      if (ct === '' || ct.startsWith('<') || ct.startsWith('- ') || ct.startsWith('> ') || ct.startsWith('## ') || ct.startsWith('### ') || /^-{3,}$/.test(ct)) break;
+      paraLines.push(convertInlineForMd(ct));
+      i++;
+    }
+    i--;
+    if (paraLines.length > 0) output.push('<p>' + paraLines.join('<br>') + '</p>');
+  }
+
+  return output.join('\n');
+}
+
+function convertInlineForMd(text) {
+  text = escapeHtml(text);
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return text;
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+
+// ══════════════ #MODAL タブ名編集モーダル（＝ファイル名編集） ══════════════
+
+const renameModal  = $('renameModal');
+const renameInput  = $('renameInput');
+
+function openRenameModal() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  renameInput.value = tab.docName || '';
+  renameModal.classList.add('active');
+  // 少し遅らせてからフォーカス（モーダルのアニメーション後）
+  setTimeout(() => {
+    renameInput.focus();
+    renameInput.select();
+  }, 300);
+}
+
+async function confirmRename() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const newName = renameInput.value.trim();
+  if (!newName) {
+    showToast('ファイル名を入力してください');
+    return;
+  }
+  // タブの状態を更新
+  tab.docName = newName;
+  updateDocNameDisplay();
+  // 既存ファイル（docIdあり）ならDBも更新
+  if (tab.docId !== null) {
+    try {
+      await updateDoc(tab.docId, { name: newName });
+      await renderLibrary();
+    } catch (e) {
+      showToast('DB更新に失敗しました');
+    }
+  }
+  renameModal.classList.remove('active');
+  showToast('ファイル名を変更しました');
+}
+
+docNameDisplay.addEventListener('click', () => openRenameModal());
+
+$('btnCloseRenameModal').addEventListener('click', () => renameModal.classList.remove('active'));
+$('btnRenameCancel').addEventListener('click', () => renameModal.classList.remove('active'));
+$('btnRenameConfirm').addEventListener('click', () => confirmRename());
+renameModal.addEventListener('click', (e) => { if (e.target === renameModal) renameModal.classList.remove('active'); });
+
+// Enterキーでも確定できるように
+renameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') confirmRename();
+});
+
+
+// ══════════════ #INIT 初期化 ══════════════
+
+function setupViewportFix() {
+  if (!window.visualViewport) return;
+  const app = document.querySelector('.app');
+  const onResize = () => { app.style.height = window.visualViewport.height + 'px'; };
+  window.visualViewport.addEventListener('resize', onResize);
+  onResize();
+}
+
+function setupBackButton() {
+  history.replaceState({ editor: true }, '');
+
+  window.addEventListener('popstate', (e) => {
+    if (App.isPreview) {
+      closePreview();
+    } else {
+      // ブラウザバック防止のみ（タブは閉じない）
+      history.pushState({ editor: true }, '');
+    }
+  });
+}
+
+async function init() {
+  try {
+    await openDB();
+  } catch (e) {
+    showToast('ローカルストレージモードで動作します', 2500);
+    console.warn('IndexedDB unavailable, using localStorage fallback:', e.message);
+  }
+
+  const restored = restoreAutosave();
+  if (!restored) {
+    createTab(null, '', '');
+    saveUndoState();
+  }
+
+  updateCharCount();
+  setupViewportFix();
+  setupBackButton();
+  setupSwipeMenu();
+}
+
+init();
+
+
+<!-- PWA インストールボタン -->
+<button id="btnInstall" style="
+  display: none;
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: #6b7b8d;
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 10px 20px;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  cursor: pointer;
+">インストール</button>
+
+<script>
+// 共有ファイルの受け取り処理（Share Target API）
+if (location.search.includes('shared=true')) {
+  (async () => {
+    try {
+      const cache = await caches.open('share-target-temp');
+      const response = await cache.match('shared-file');
+      if (response) {
+        const text = await response.text();
+        const params = new URLSearchParams(location.search);
+        const fileName = params.get('name') || '共有ファイル';
+        createTab(null, fileName, text);
+        await cache.delete('shared-file');
+        history.replaceState({}, '', '/pegmemo/');
+      }
+    } catch(e) {}
+  })();
+}
+</script>
+
+<script>
+// PWA インストールボタン制御
+let deferredPrompt = null;
+const btnInstall = document.getElementById('btnInstall');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  btnInstall.style.display = '';
+});
+
+btnInstall.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const result = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  btnInstall.style.display = 'none';
+});
+
+window.addEventListener('appinstalled', () => {
+  btnInstall.style.display = 'none';
+  deferredPrompt = null;
+});
+</script>
+
+
+</body>
+</html>
