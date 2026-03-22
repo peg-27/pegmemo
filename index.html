@@ -11,9 +11,50 @@
 <link rel="manifest" href="/pegmemo/manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="/pegmemo/icon-192.png">
 <script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/pegmemo/sw.js');
-  }
+// ═══════════════ SW登録＆更新通知 ═══════════════
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/pegmemo/sw.js').then((registration) => {
+    // 定期的に更新をチェック（1時間ごと）
+    setInterval(() => {
+      registration.update();
+    }, 60 * 60 * 1000);
+
+    // 新しいSWが見つかった時の処理
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          // 新バージョンが待機中 → 更新通知を表示
+          showUpdateNotification(newWorker);
+        }
+      });
+    });
+  });
+
+  // SWが切り替わったらページをリロード
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    window.location.reload();
+  });
+}
+
+function showUpdateNotification(newWorker) {
+  // 既に通知が出ていたら重複しない
+  if (document.getElementById('sw-update-bar')) return;
+
+  const bar = document.createElement('div');
+  bar.id = 'sw-update-bar';
+  bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#ffffff;color:#333;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;z-index:99999;font-size:14px;box-shadow:0 -2px 8px rgba(0,0,0,0.15);';
+
+  bar.innerHTML = '<span>新しいバージョンがあります</span><button id="sw-update-btn" style="background:#6b7b8d;color:#fff;border:none;padding:6px 16px;border-radius:4px;font-size:14px;font-weight:bold;cursor:pointer;">更新する</button>';
+
+  document.body.appendChild(bar);
+
+  document.getElementById('sw-update-btn').addEventListener('click', () => {
+    newWorker.postMessage({ type: 'SKIP_WAITING' });
+    bar.textContent = '更新中...';
+  });
+}
+// ═══════════════ SW登録＆更新通知 ここまで ═══════════════
 </script>
 
 <!--

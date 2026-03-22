@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pegmemo-v1';
+const CACHE_NAME = 'pegmemo-v2';
 const FILES_TO_CACHE = [
   '/pegmemo/',
   '/pegmemo/manifest.json',
@@ -12,7 +12,7 @@ self.addEventListener('install', (event) => {
       return cache.addAll(FILES_TO_CACHE);
     })
   );
-  self.skipWaiting();
+  // skipWaiting を削除 → 新SWはユーザーが許可するまで待機する
 });
 
 self.addEventListener('activate', (event) => {
@@ -28,6 +28,13 @@ self.addEventListener('activate', (event) => {
     })
   );
   self.clients.claim();
+});
+
+// メッセージを受け取ったらskipWaitingを実行（ユーザーが更新ボタンを押した時）
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
