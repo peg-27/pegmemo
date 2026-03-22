@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pegmemo-v4';
+const CACHE_NAME = 'pegmemo-v5';
 const FILES_TO_CACHE = [
   '/pegmemo/',
   '/pegmemo/manifest.json',
