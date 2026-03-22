@@ -24,6 +24,7 @@
   #BASE          CSS変数・リセット・レイアウト基盤
   #HEADER        ヘッダーバー（ファイル名・Undo/Redo）
   #TOOLBAR       ツールバー（書式ボタン・罫線・テンプレ選択・文字数）
+  #SEARCH        エディタ内検索・ライブラリ内検索
   #PREVIEW       プレビュー表示（HTML/MD切り替え）
   #EDITOR        テキストエリア本体
   #TOAST         トースト通知
@@ -52,10 +53,11 @@
 <style>
   /* カラーパレット（CSS変数） */
   :root {
-    --bg: #faf9f7;
+    --bg: #FAF5F9;
     --surface: #ffffff;
-    --border: #e0ddd8;
-    --border-light: #eae7e2;
+    --border: #D1D1D1;
+    --border-light: #DEDEDE;
+    --border-btn: #B5B5B5;
     --text: #2c2c2c;
     --text-mid: #666;
     --text-light: #4a4a4a;
@@ -100,7 +102,7 @@
     align-items: center;
     justify-content: center;
     padding: 6px 10px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-btn);
     border-radius: 6px;
     background: var(--surface);
     color: var(--text);
@@ -187,7 +189,7 @@
     width: 36px;
     height: 36px;
     padding: 0;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-btn);
     border-radius: 6px;
     background: var(--surface);
     cursor: pointer;
@@ -213,7 +215,7 @@
     height: 20px;
     text-align: center;
     flex-shrink: 0;
-    padding: 3px 4px 0 4px;
+    padding: 0 4px;
     border: 1.5px solid #F0D8E7;
     border-radius: 10px;
     background: #F7EDF6;
@@ -222,6 +224,7 @@
     justify-content: center;
     box-sizing: border-box;
     align-self: center;
+    line-height: 1;
   }
   /* プレビュー・HTML出力ボタン */
   .btn-header-action {
@@ -231,7 +234,7 @@
     width: 40px;
     height: 36px;
     padding: 0;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-btn);
     border-radius: 6px;
     background: var(--surface);
     cursor: pointer;
@@ -282,18 +285,28 @@
       <span class="doc-name untitled" id="docNameDisplay" title="タップしてファイル名を編集">無題</span>
     </div>
     <div class="header-right">
+      <!-- エディタ内検索 -->
+      <button class="btn-header-action" id="btnSearch" title="検索">
+        <svg viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="16.5" y1="16.5" x2="21" y2="21"/>
+        </svg>
+      </button>
       <!-- プレビュー -->
       <button class="btn-header-action" id="btnPreview" title="プレビュー">▶</button>
-        <!-- HTML出力 -->
-      <button class="btn-header-action btn-accent" id="btnHtmlOutput" title="HTML出力">
-        <svg viewBox="0 0 24 24" preserveAspectRatio="none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-   <polyline points="17,18 22,12 17,6"/>
-  <polyline points="7,6 2,12 7,18"/>
-  <line x1="13.5" y1="4" x2="10.5" y2="20"/>
-</svg>
-      </button>
     </div>
   </div>
+
+<!-- 全文検索中ヘッダー -->
+<div class="fullsearch-nav-header" id="fullsearchNavHeader">
+  <button class="fullsearch-back-btn" id="fullsearchBack">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19 12H5"/>
+      <path d="M12 19l-7-7 7-7"/>
+    </svg>
+  </button>
+  <span class="fullsearch-nav-docname" id="fullsearchNavDocName"></span>
+</div>
 
 
 <!-- ══════════════ #TOOLBAR ツールバー（書式ボタン・罫線・テンプレ選択・文字数） ══════════════ -->
@@ -374,6 +387,14 @@
   }
   .tpl-popup-item:last-child { border-bottom: none; }
   .tpl-popup-item:active { background: var(--btn-hover); }
+
+.search-nav-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
 </style>
 
 <!-- ツールバーHTML -->
@@ -408,6 +429,438 @@
     <div class="toolbar-spacer"></div>
     <span class="toolbar-charcount" id="charCount">0 文字</span>
   </div>
+
+<!-- 検索ナビバー -->
+  <div class="search-nav" id="searchNav" style="position:relative;">
+    <span class="search-nav-query" id="searchNavQuery"></span>
+    <span class="search-nav-count" id="searchNavCount">0件</span>
+    <div class="search-nav-buttons">
+      <button class="search-nav-btn" id="searchNavPrev" disabled>↑</button>
+      <button class="search-nav-btn" id="searchNavNext" disabled>↓</button>
+      <button class="search-nav-btn search-nav-close-gap" id="searchNavClose">✕</button>
+    </div>
+  </div>
+
+
+<!-- ══════════════ #SEARCH 検索モーダル・検索ナビバー ══════════════ -->
+<style>
+  /* ── 検索モーダル ── */
+  .search-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 4000;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+    padding-top: 50%;
+  }
+  .search-modal-overlay.active { display: flex; }
+  .search-modal {
+    width: 100%;
+    max-width: 320px;
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 20px 16px 16px;
+  }
+  .search-modal-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 14px;
+  }
+  .search-input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  #searchInput {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+  }
+  #searchInput:focus { border-color: var(--accent); }
+  #searchInput::-webkit-search-cancel-button { display: none; }
+  #searchInput::-webkit-search-decoration { display: none; }
+  .search-clear-btn {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--btn-hover);
+    color: var(--text);
+    font-size: 17px;
+    cursor: pointer;
+  }
+  .search-clear-btn:active { background: var(--border-light); }
+  .search-hist-title {
+    font-size: 11px;
+    color: var(--text-mid);
+    margin-bottom: 6px;
+  }
+  .search-hist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .search-hist-item {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .search-hist-item:active { border-color: var(--accent); }
+  .search-modal-btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .search-modal-btns .btn { flex: 1; min-height: 40px; font-size: 14px; }
+  /* 履歴削除ポップアップ */
+  .search-hist-popup {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    z-index: 4100;
+    overflow: hidden;
+    min-width: 100px;
+  }
+  .search-hist-popup-btn {
+    display: block;
+    width: 100%;
+    padding: 11px 16px;
+    border: none;
+    background: var(--surface);
+    color: var(--danger);
+    font-size: 13px;
+    font-family: inherit;
+    text-align: center;
+    cursor: pointer;
+  }
+  .search-hist-popup-btn:active { background: var(--btn-hover); }
+
+  /* ── 検索ナビバー ── */
+  .search-nav {
+    display: none;
+    align-items: center;
+    padding: 6px 12px;
+    gap: 10px;
+    background: var(--toolbar-bg);
+    border-bottom: 1px solid var(--border-light);
+    min-height: 42px;
+  }
+  .search-nav.active { display: flex; }
+  .search-nav-query {
+    flex: 1;
+    min-width: 0;
+    max-width: calc(50% - 15px);
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    padding: 4px 2px;
+    border-radius: 6px;
+  }
+  .search-nav-query:active { background: var(--btn-hover); }
+  .search-nav-count {
+    font-size: 12px;
+    color: var(--text-mid);
+    flex-shrink: 0;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .search-nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .search-nav-btn:active { background: var(--btn-hover); }
+  .search-nav-btn:disabled { opacity: 0.35; }
+  .search-nav-close-gap {
+    margin-left: 20px;
+  }
+
+/* ── 全文検索パネル ── */
+  .fullsearch-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 3500;
+  }
+  .fullsearch-overlay.active { display: block; }
+
+  .fullsearch-panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background: var(--surface);
+    z-index: 3501;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out;
+  }
+  .fullsearch-panel.active { transform: translateX(0); }
+
+  .fullsearch-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border-light);
+    flex-shrink: 0;
+  }
+  .fullsearch-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  .fullsearch-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border-btn);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 17px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .fullsearch-close-btn:active { background: var(--btn-hover); }
+
+  .fullsearch-input-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    flex-shrink: 0;
+  }
+  .fullsearch-input-wrap {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+  }
+  #fullsearchInput {
+    width: 100%;
+    padding: 10px 36px 10px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+  }
+  #fullsearchInput:focus { border-color: var(--accent); }
+  #fullsearchInput::-webkit-search-cancel-button { display: none; }
+  #fullsearchInput::-webkit-search-decoration { display: none; }
+  .fullsearch-clear-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-mid);
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .fullsearch-clear-btn:active { background: var(--btn-hover); }
+  .fullsearch-go-btn {
+    flex-shrink: 0;
+    min-width: 56px;
+    height: 40px;
+    font-size: 14px;
+  }
+
+  .fullsearch-hist-area {
+    padding: 0 16px 8px;
+    flex-shrink: 0;
+  }
+  .fullsearch-hist-title {
+    font-size: 11px;
+    color: var(--text-mid);
+    margin-bottom: 6px;
+  }
+  .fullsearch-hist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .fullsearch-results {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .fullsearch-result-count {
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    color: var(--text-mid);
+  }
+  .fullsearch-result-item {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-bottom: 1px solid var(--border-light);
+    background: none;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    gap: 3px;
+  }
+  .fullsearch-result-item:active { background: var(--btn-hover); }
+  .fullsearch-result-name {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+  }
+  .fullsearch-result-date {
+    font-size: 11px;
+    color: var(--text-mid);
+  }
+  .fullsearch-empty {
+    padding: 32px 16px;
+    font-size: 13px;
+    color: var(--text-mid);
+    text-align: center;
+  }
+
+  /* ── 全文検索中ヘッダー ── */
+  .fullsearch-nav-header {
+    display: none;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    min-height: 44px;
+    gap: 8px;
+  }
+  .fullsearch-nav-header.active { display: flex; }
+  .fullsearch-back-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .fullsearch-back-btn:active { background: var(--btn-hover); }
+  .fullsearch-nav-docname {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 1;
+  }
+
+</style>
+
+<!-- 検索モーダルHTML -->
+<div class="search-modal-overlay" id="searchModalOverlay">
+  <div class="search-modal">
+    <div class="search-modal-title">検索</div>
+    <div class="search-input-row">
+      <input type="search" id="searchInput" placeholder="検索語句を入力..." autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="search-clear-btn" id="searchClear">✕</button>
+    </div>
+    <div id="searchHistWrap" style="display:none">
+      <div class="search-hist-title">履歴</div>
+      <div class="search-hist" id="searchHist"></div>
+    </div>
+    <div class="search-modal-btns">
+      <button class="btn" id="searchCancel">キャンセル</button>
+      <button class="btn btn-accent" id="searchGo">検索</button>
+    </div>
+  </div>
+</div>
+
+<!-- 全文検索パネル -->
+<div class="fullsearch-overlay" id="fullsearchOverlay"></div>
+<div class="fullsearch-panel" id="fullsearchPanel">
+  <div class="fullsearch-header">
+    <span class="fullsearch-title">全文検索</span>
+    <button class="fullsearch-close-btn" id="fullsearchClose">✕</button>
+  </div>
+  <div class="fullsearch-input-row">
+    <div class="fullsearch-input-wrap">
+      <input type="search" id="fullsearchInput" placeholder="検索語句を入力..." autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+      <button class="fullsearch-clear-btn" id="fullsearchClear">✕</button>
+    </div>
+    <button class="btn btn-accent fullsearch-go-btn" id="fullsearchGo">検索</button>
+  </div>
+  <div class="fullsearch-hist-area" id="fullsearchHistWrap" style="display:none">
+    <div class="fullsearch-hist-title">履歴</div>
+    <div class="fullsearch-hist" id="fullsearchHist"></div>
+  </div>
+  <div class="fullsearch-results" id="fullsearchResults"></div>
+</div>
 
 
 <!-- ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════ -->
@@ -744,12 +1197,38 @@
   .menu-header {
     padding: 16px 16px 12px;
     border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
   .menu-header-title {
     font-size: 15px;
     font-weight: 700;
     color: var(--accent);
     letter-spacing: 0.5px;
+  }
+  .menu-search-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border-btn);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .menu-search-btn:active { background: var(--btn-hover); }
+  .menu-search-btn svg {
+    width: 20px;
+    height: 20px;
+    stroke: var(--accent);
+    fill: none;
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .menu-item {
@@ -791,6 +1270,9 @@
     font-family: inherit;
     cursor: pointer;
     text-align: left;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
   .menu-history-item:active { background: var(--btn-hover); }
   .menu-history-name {
@@ -857,17 +1339,36 @@
 <div class="menu-panel" id="menuPanel">
   <div class="menu-header">
     <span class="menu-header-title">PEG memo</span>
+    <button class="menu-search-btn" id="menuSearch" title="全文検索">
+      <svg viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="7"/>
+        <line x1="16.5" y1="16.5" x2="21" y2="21"/>
+      </svg>
+    </button>
   </div>
   <button class="menu-item" id="menuNewDoc">新規文書</button>
   <div class="menu-sep"></div>
   <button class="menu-item" id="menuSave">上書き保存</button>
   <button class="menu-item" id="menuSaveAs">別名保存</button>
-  <button class="menu-item" disabled>ダウンロード（準備中）</button>
+  <button class="menu-item" id="menuShare">共有</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" id="menuImpExp">インポート／エクスポート</button>
   <div class="menu-sep"></div>
   <button class="menu-item" id="menuLibrary">ライブラリ</button>
   <div class="menu-sep"></div>
   <div class="menu-label">履歴</div>
   <div id="menuHistory"></div>
+</div>
+<input type="file" id="importFileInput" accept=".json" style="display:none;">
+
+<!-- インポート／エクスポート選択モーダルHTML -->
+<div class="namedialog-overlay" id="impExpOverlay">
+  <div class="namedialog">
+    <div class="namedialog-title">インポート／エクスポート</div>
+    <button class="btn btn-accent" id="impExpExport" style="min-height:44px;font-size:14px;">エクスポート（バックアップ書出し）</button>
+    <button class="btn btn-accent" id="impExpImport" style="min-height:44px;font-size:14px;">インポート（バックアップ読込み）</button>
+    <button class="btn" id="impExpCancel" style="min-height:40px;font-size:14px;">キャンセル</button>
+  </div>
 </div>
 
 <!-- ファイル名入力モーダルHTML -->
@@ -1375,6 +1876,8 @@
 
 <!-- ══════════════ #TABPANEL タブパネル（右スライド・タブ切替・タブ閉じ） ══════════════ -->
 <style>
+
+  /* --- オーバーレイ（パネル背後の半透明黒幕） --- */
   .tab-overlay {
     display: none;
     position: fixed;
@@ -1384,6 +1887,7 @@
   }
   .tab-overlay.active { display: block; }
 
+  /* --- パネル本体（右端から横スライドで出現） --- */
   .tab-panel {
     position: fixed;
     top: 0;
@@ -1400,6 +1904,7 @@
   }
   .tab-panel.active { transform: translateX(0); }
 
+  /* --- パネルヘッダー（「タブ一覧」タイトル＋個数表示） --- */
   .tab-panel-header {
     padding: 16px 16px 12px;
     border-bottom: 1px solid var(--border-light);
@@ -1410,20 +1915,24 @@
   }
   .tab-panel-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 400;
     color: var(--text);
+    flex: 1;
+    text-align: center;
   }
   .tab-panel-count {
     font-size: 12px;
     color: var(--text-mid);
   }
 
+  /* --- タブ一覧スクロール領域 --- */
   .tab-list-scroll {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
 
+  /* --- 各タブ項目（1行＝タブ名＋閉じるボタン） --- */
   .tab-item {
     display: flex;
     align-items: center;
@@ -1442,6 +1951,8 @@
   }
   .tab-item:active { background: var(--btn-hover); }
   .tab-item.active-tab { background: var(--accent-light); }
+
+  /* --- タブ名テキスト --- */
   .tab-item-name {
     flex: 1;
     font-size: 13px;
@@ -1455,6 +1966,8 @@
     -webkit-touch-callout: none;
   }
   .tab-item.active-tab .tab-item-name { font-weight: 600; }
+
+  /* --- タブ閉じるボタン（×） --- */
   .tab-item-close {
     display: flex;
     align-items: center;
@@ -1471,6 +1984,7 @@
   }
   .tab-item-close:active { background: var(--btn-hover); color: var(--danger); }
 
+  /* --- タブなし時のメッセージ --- */
   .tab-empty {
     padding: 20px 16px;
     font-size: 13px;
@@ -1478,36 +1992,81 @@
     text-align: center;
   }
 
+  /* --- 下部アクションボタン群（2×2グリッド） --- */
   .tab-panel-actions {
     flex-shrink: 0;
     border-top: 1px solid var(--border-light);
     padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
   .tab-panel-actions .btn {
     width: 100%;
-    min-height: 44px;
-    font-size: 14px;
+    min-height: 54px;
+    font-size: 13px;
   }
+
+  /* --- 新規文書作成ボタン（ピンク背景） --- */
+  .tab-panel-actions .btn-pink {
+    background: #F48FB1;
+    border-color: #F48FB1;
+    color: #fff;
+  }
+  .tab-panel-actions .btn-pink:active { opacity: 0.8; }
+
+  /* --- HTML出力ボタン（アイコンのみ・独自背景色） --- */
+  .tab-panel-actions .btn-html-output {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #c49eca;
+    border-color: #c49eca;
+  }
+  .tab-panel-actions .btn-html-output:active { opacity: 0.8; }
+  .tab-panel-actions .btn-html-output svg {
+    width: 40px;
+    height: 30px;
+    stroke: #fff;
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
 </style>
 
-<!-- タブパネルHTML -->
+<!-- オーバーレイ（パネル外タップで閉じる用） -->
 <div class="tab-overlay" id="tabOverlay"></div>
+
+<!-- タブパネル本体 -->
 <div class="tab-panel" id="tabPanel">
+
+  <!-- パネルヘッダー：タブ一覧タイトル＋個数 -->
   <div class="tab-panel-header">
     <span class="tab-panel-title">タブ一覧</span>
     <span class="tab-panel-count" id="tabPanelCount"></span>
   </div>
+
+  <!-- タブ一覧（スクロール領域） -->
   <div class="tab-list-scroll">
     <div id="tabList"></div>
   </div>
+
+  <!-- 下部アクションボタン群（2×2グリッド） -->
   <div class="tab-panel-actions">
-    <button class="btn btn-accent" id="tabPanelNewDoc">新規文書作成</button>
-    <button class="btn" id="tabPanelSave">上書き保存</button>
+    <button class="btn btn-pink" id="tabPanelNewDoc">新規文書作成</button>
     <button class="btn" id="tabPanelSaveAs">別名保存</button>
+    <button class="btn" id="tabPanelSave">上書き保存</button>
+    <button class="btn btn-accent btn-html-output" id="btnHtmlOutput" title="HTML出力">
+      <svg viewBox="0 0 24 24" preserveAspectRatio="none" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="17,18 22,12 17,6"/>
+        <polyline points="7,6 2,12 7,18"/>
+        <line x1="13.5" y1="4" x2="10.5" y2="20"/>
+      </svg>
+    </button>
   </div>
+
 </div>
 
 
@@ -1907,7 +2466,7 @@ const App = {
   // カスタムテンプレート用
   customTemplates: [],
   selectedCustomTplId: null,
-  customTplSort: 'date-desc',   // 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc'
+  customTplSort: 'date-desc',
 };
 
 const $ = id => document.getElementById(id);
@@ -1917,6 +2476,7 @@ const btnUndo         = $('btnUndo');
 const btnRedo         = $('btnRedo');
 const btnPreview      = $('btnPreview');
 const btnHtmlOutput   = $('btnHtmlOutput');
+const btnSearch       = $('btnSearch');
 const previewIndicator = $('previewIndicator');
 const previewModeLabel = $('previewModeLabel');
 const charCount       = $('charCount');
@@ -2714,6 +3274,502 @@ hrPopup.addEventListener('click', (e) => {
 });
 
 
+// ══════════════ #SEARCH 検索 ══════════════
+
+const searchModalOverlay = $('searchModalOverlay');
+const searchInput   = $('searchInput');
+const searchHistEl  = $('searchHist');
+const searchHistWrap = $('searchHistWrap');
+const searchNav      = $('searchNav');
+const searchNavQuery = $('searchNavQuery');
+const searchNavCount = $('searchNavCount');
+const searchNavPrev  = $('searchNavPrev');
+const searchNavNext  = $('searchNavNext');
+const toolbar        = $('toolbar');
+
+let searchMatches  = [];
+let searchCurIdx   = -1;
+let searchHistory  = [];    // 最大5件
+let searchActivePopup = null;
+
+// ── 履歴削除ポップアップ管理 ──
+function closeSearchHistPopup() {
+  if (searchActivePopup) {
+    searchActivePopup.remove();
+    searchActivePopup = null;
+  }
+}
+
+// ── モーダルを開く ──
+function openSearchModal() {
+  closeSearchHistPopup();
+  searchModalOverlay.classList.add('active');
+  buildSearchHist();
+  setTimeout(() => searchInput.focus(), 100);
+}
+
+// ── モーダルを閉じる ──
+function closeSearchModal() {
+  closeSearchHistPopup();
+  searchModalOverlay.classList.remove('active');
+}
+
+// ── 履歴一覧を再描画 ──
+function buildSearchHist() {
+  if (!searchHistory.length) { searchHistWrap.style.display = 'none'; return; }
+  searchHistWrap.style.display = '';
+  searchHistEl.innerHTML = '';
+
+  for (let i = searchHistory.length - 1; i >= 0; i--) {
+    const q = searchHistory[i];
+    const el = document.createElement('span');
+    el.className = 'search-hist-item';
+    el.textContent = q;
+
+    // タップ → 入力欄に反映するだけ（即実行しない）
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      searchInput.value = q;
+      searchInput.focus();
+    });
+
+    // 長押し → 削除ポップアップ
+    let longTimer = null;
+    el.addEventListener('touchstart', () => {
+      longTimer = setTimeout(() => {
+        longTimer = null;
+        closeSearchHistPopup();
+        const popup = document.createElement('div');
+        popup.className = 'search-hist-popup';
+        const btn = document.createElement('button');
+        btn.className = 'search-hist-popup-btn';
+        btn.textContent = '削除';
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const hi = searchHistory.indexOf(q);
+          if (hi !== -1) searchHistory.splice(hi, 1);
+          closeSearchHistPopup();
+          buildSearchHist();
+        });
+        popup.appendChild(btn);
+        document.body.appendChild(popup);
+        const rect = el.getBoundingClientRect();
+        const popH = popup.offsetHeight;
+        popup.style.left = rect.left + 'px';
+        popup.style.top = (rect.top - popH - 4) + 'px';
+        searchActivePopup = popup;
+      }, 500);
+    }, { passive: true });
+    el.addEventListener('touchend', () => {
+      if (longTimer) { clearTimeout(longTimer); longTimer = null; }
+    });
+    el.addEventListener('touchmove', () => {
+      if (longTimer) { clearTimeout(longTimer); longTimer = null; }
+    });
+
+    searchHistEl.appendChild(el);
+  }
+}
+
+// ── 検索実行 ──
+function execSearch(q) {
+  if (!q) return;
+  closeSearchModal();
+
+  // 履歴に追加（重複除去・最大5件）
+  const idx = searchHistory.indexOf(q);
+  if (idx !== -1) searchHistory.splice(idx, 1);
+  searchHistory.push(q);
+  if (searchHistory.length > 5) searchHistory.shift();
+
+  // マッチ位置を全列挙
+  searchMatches = [];
+  const text = editor.value;
+  const qLow = q.toLowerCase();
+  const tLow = text.toLowerCase();
+  let pos = 0;
+  while (true) {
+    const i = tLow.indexOf(qLow, pos);
+    if (i === -1) break;
+    searchMatches.push({ start: i, end: i + q.length });
+    pos = i + 1;
+  }
+  searchCurIdx = -1;
+
+  // ツールバーを検索ナビに切替
+  toolbar.style.display = 'none';
+  searchNav.classList.add('active');
+  searchNavQuery.textContent = '"' + q + '"';
+
+  // キーボードが出ないよう inputmode="none" をセット
+  editor.setAttribute('inputmode', 'none');
+
+  if (searchMatches.length) {
+    jumpSearch(0);
+  } else {
+    searchNavCount.textContent = '0件';
+    searchNavPrev.disabled = true;
+    searchNavNext.disabled = true;
+  }
+}
+
+// ── ミラーdivでキャレットの実際のtop位置を取得 ──
+function getSearchCaretTop(charIndex) {
+  const div = document.createElement('div');
+  const cs = getComputedStyle(editor);
+  ['fontFamily','fontSize','fontWeight','lineHeight',
+   'paddingTop','paddingRight','paddingBottom','paddingLeft',
+   'borderTopWidth','borderRightWidth','borderBottomWidth','borderLeftWidth',
+   'boxSizing','width','wordWrap','overflowWrap','whiteSpace','tabSize'
+  ].forEach(p => { div.style[p] = cs[p]; });
+  div.style.position   = 'absolute';
+  div.style.top        = '0';
+  div.style.left       = '-9999px';
+  div.style.whiteSpace = 'pre-wrap';
+  div.style.wordBreak  = 'break-word';
+  div.style.overflow   = 'hidden';
+  div.style.visibility = 'hidden';
+
+  div.textContent = editor.value.substring(0, charIndex);
+  const span = document.createElement('span');
+  span.textContent = '|';
+  div.appendChild(span);
+
+  document.body.appendChild(div);
+  const top = span.offsetTop;
+  document.body.removeChild(div);
+  return top;
+}
+
+// ── 指定インデックスにジャンプ ──
+function jumpSearch(idx) {
+  if (!searchMatches.length) return;
+  searchCurIdx = (idx + searchMatches.length) % searchMatches.length;
+  const m = searchMatches[searchCurIdx];
+
+  // ミラーdivで実測した位置をもとにスクロール
+  const caretTop = getSearchCaretTop(m.start);
+  editor.scrollTop = Math.max(0, caretTop - editor.clientHeight / 2);
+
+  requestAnimationFrame(() => {
+    editor.focus();
+    editor.setSelectionRange(m.start, m.end);
+  });
+
+  searchNavCount.textContent = (searchCurIdx + 1) + '/' + searchMatches.length;
+  searchNavPrev.disabled = false;
+  searchNavNext.disabled = false;
+}
+
+// ── 検索ナビを終了してツールバーを通常に戻す ──
+function closeSearchNav() {
+  searchNav.classList.remove('active');
+  toolbar.style.display = '';
+  searchMatches = [];
+  searchCurIdx = -1;
+  editor.removeAttribute('inputmode');
+}
+
+// ── 検索ナビ中にtextareaをタッチ → inputmode解除 ──
+editor.addEventListener('touchstart', () => {
+  if (searchNav.classList.contains('active') && editor.hasAttribute('inputmode')) {
+    editor.removeAttribute('inputmode');
+  }
+}, { passive: true });
+
+// ── イベント登録 ──
+btnSearch.addEventListener('click', openSearchModal);
+searchNavQuery.addEventListener('click', openSearchModal);
+searchModalOverlay.addEventListener('click', (e) => {
+  if (e.target === searchModalOverlay) { closeSearchHistPopup(); closeSearchModal(); }
+});
+$('searchCancel').addEventListener('click', closeSearchModal);
+$('searchGo').addEventListener('click', () => execSearch(searchInput.value.trim()));
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); execSearch(searchInput.value.trim()); }
+});
+$('searchClear').addEventListener('click', () => { searchInput.value = ''; searchInput.focus(); });
+searchNavNext.addEventListener('click', () => { editor.setAttribute('inputmode', 'none'); jumpSearch(searchCurIdx + 1); });
+searchNavPrev.addEventListener('click', () => { editor.setAttribute('inputmode', 'none'); jumpSearch(searchCurIdx - 1); });
+$('searchNavClose').addEventListener('click', closeSearchNav);
+
+// ── 全文検索 ──
+
+const fullsearchPanel     = $('fullsearchPanel');
+const fullsearchOverlay   = $('fullsearchOverlay');
+const fullsearchInput     = $('fullsearchInput');
+const fullsearchHistEl    = $('fullsearchHist');
+const fullsearchHistWrap  = $('fullsearchHistWrap');
+const fullsearchResults   = $('fullsearchResults');
+const fullsearchNavHeader = $('fullsearchNavHeader');
+const fullsearchNavDocName = $('fullsearchNavDocName');
+
+let fullsearchHistory = [];
+let fullsearchQuery   = '';
+let fullsearchMode    = false;
+let fullsearchHistoryDepth = 0;
+let fsIgnorePopstate = false;
+
+// ── パネルを開く ──
+function openFullsearchPanel(focusInput, skipHistory) {
+  if (focusInput === undefined) focusInput = true;
+  fullsearchOverlay.classList.add('active');
+  fullsearchPanel.classList.add('active');
+  buildFullsearchHist();
+  if (focusInput) setTimeout(() => fullsearchInput.focus(), 200);
+  if (!skipHistory) {
+    history.pushState({fsState: 'panel'}, '');
+    fullsearchHistoryDepth = 1;
+  }
+}
+
+// ── パネルを閉じる（メニューに戻る） ──
+function closeFullsearchPanel() {
+  fullsearchPanel.classList.remove('active');
+  fullsearchOverlay.classList.remove('active');
+}
+
+// ── 全文検索モード完全終了（エディタに戻る） ──
+function closeFullsearchMode() {
+  closeFullsearchPanel();
+  closeMenu();
+  closeSearchNav();
+  fullsearchMode = false;
+  fullsearchNavHeader.classList.remove('active');
+  document.querySelector('.header').style.display = '';
+  if (fullsearchHistoryDepth > 0) {
+    fsIgnorePopstate = true;
+    history.go(-fullsearchHistoryDepth);
+    fullsearchHistoryDepth = 0;
+  }
+}
+
+// ── 履歴描画 ──
+function buildFullsearchHist() {
+  if (!fullsearchHistory.length) { fullsearchHistWrap.style.display = 'none'; return; }
+  fullsearchHistWrap.style.display = '';
+  fullsearchHistEl.innerHTML = '';
+
+  for (let i = fullsearchHistory.length - 1; i >= 0; i--) {
+    const q = fullsearchHistory[i];
+    const el = document.createElement('span');
+    el.className = 'search-hist-item';
+    el.textContent = q;
+
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      fullsearchInput.value = q;
+      fullsearchInput.focus();
+    });
+
+    let longTimer = null;
+    el.addEventListener('touchstart', () => {
+      longTimer = setTimeout(() => {
+        longTimer = null;
+        closeSearchHistPopup();
+        const popup = document.createElement('div');
+        popup.className = 'search-hist-popup';
+        const btn = document.createElement('button');
+        btn.className = 'search-hist-popup-btn';
+        btn.textContent = '削除';
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const hi = fullsearchHistory.indexOf(q);
+          if (hi !== -1) fullsearchHistory.splice(hi, 1);
+          closeSearchHistPopup();
+          buildFullsearchHist();
+        });
+        popup.appendChild(btn);
+        document.body.appendChild(popup);
+        const rect = el.getBoundingClientRect();
+        const popH = popup.offsetHeight;
+        popup.style.left = rect.left + 'px';
+        popup.style.top = (rect.top - popH - 4) + 'px';
+        searchActivePopup = popup;
+      }, 500);
+    }, { passive: true });
+    el.addEventListener('touchend', () => { if (longTimer) { clearTimeout(longTimer); longTimer = null; } });
+    el.addEventListener('touchmove', () => { if (longTimer) { clearTimeout(longTimer); longTimer = null; } });
+
+    fullsearchHistEl.appendChild(el);
+  }
+}
+
+// ── 全文検索実行 ──
+async function execFullsearch(q) {
+  if (!q) return;
+
+  // 履歴に追加（重複除去・最大5件）
+  const hi = fullsearchHistory.indexOf(q);
+  if (hi !== -1) fullsearchHistory.splice(hi, 1);
+  fullsearchHistory.push(q);
+  if (fullsearchHistory.length > 5) fullsearchHistory.shift();
+
+  fullsearchQuery = q;
+  fullsearchMode = true;
+
+  fullsearchResults.innerHTML = '<div class="fullsearch-empty">検索中...</div>';
+
+  try {
+    const docs = await getAllDocs();
+    const qLow = q.toLowerCase();
+    const hits = docs.filter(d => {
+      const content = (d.content || '').toLowerCase();
+      const name = (d.name || '').toLowerCase();
+      return content.includes(qLow) || name.includes(qLow);
+    });
+
+    hits.sort((a, b) => {
+      const da = a.updatedAt instanceof Date ? a.updatedAt : new Date(a.updatedAt);
+      const db2 = b.updatedAt instanceof Date ? b.updatedAt : new Date(b.updatedAt);
+      return db2 - da;
+    });
+
+    renderFullsearchResults(hits, q);
+  } catch (e) {
+    fullsearchResults.innerHTML = '<div class="fullsearch-empty">検索エラー: ' + e.message + '</div>';
+  }
+}
+
+// ── 結果描画 ──
+function renderFullsearchResults(hits, q) {
+  fullsearchResults.innerHTML = '';
+
+  const countDiv = document.createElement('div');
+  countDiv.className = 'fullsearch-result-count';
+  countDiv.textContent = hits.length + '件ヒット';
+  fullsearchResults.appendChild(countDiv);
+
+  if (!hits.length) {
+    const empty = document.createElement('div');
+    empty.className = 'fullsearch-empty';
+    empty.textContent = '「' + q + '」を含む文書は見つかりませんでした';
+    fullsearchResults.appendChild(empty);
+    return;
+  }
+
+  hits.forEach(doc => {
+    const btn = document.createElement('button');
+    btn.className = 'fullsearch-result-item';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'fullsearch-result-name';
+    nameSpan.textContent = doc.name || '無題';
+
+    const dateSpan = document.createElement('span');
+    dateSpan.className = 'fullsearch-result-date';
+    const d = doc.updatedAt instanceof Date ? doc.updatedAt : new Date(doc.updatedAt);
+    if (!isNaN(d.getTime())) {
+      dateSpan.textContent = d.getFullYear() + '/' +
+        String(d.getMonth() + 1).padStart(2, '0') + '/' +
+        String(d.getDate()).padStart(2, '0') + ' ' +
+        String(d.getHours()).padStart(2, '0') + ':' +
+        String(d.getMinutes()).padStart(2, '0');
+    }
+
+    btn.appendChild(nameSpan);
+    btn.appendChild(dateSpan);
+    btn.addEventListener('click', () => openDocFromFullsearch(doc.id));
+    fullsearchResults.appendChild(btn);
+  });
+}
+
+// ── 結果からファイルを開く ──
+async function openDocFromFullsearch(docId) {
+  try {
+    const doc = await getDoc(docId);
+    if (!doc) { showToast('文書が見つかりません'); return; }
+
+    const existingTab = findTabByDocId(docId);
+    if (existingTab) {
+      switchTab(existingTab.tabId);
+    } else {
+      const activeTab = getActiveTab();
+      if (App.tabs.length === 1 && activeTab && activeTab.docId === null && activeTab.content.trim() === '') {
+        activeTab.docId = doc.id;
+        activeTab.docName = doc.name;
+        activeTab.content = doc.content;
+        activeTab.isDirty = false;
+        editor.value = doc.content;
+        updateDocNameDisplay();
+        updateCharCount();
+        saveUndoState();
+        autosave();
+      } else {
+        createTab(doc.id, doc.name, doc.content);
+        saveUndoState();
+        autosave();
+      }
+    }
+
+    // パネルとメニューを閉じる
+    closeFullsearchPanel();
+    closeMenu();
+
+    // ヘッダー差し替え
+    document.querySelector('.header').style.display = 'none';
+    fullsearchNavHeader.classList.add('active');
+    fullsearchNavDocName.textContent = doc.name || '無題';
+
+    // 戻るボタン用の履歴を積む
+    history.pushState({fsState: 'viewing'}, '');
+    fullsearchHistoryDepth = 2;
+
+    // エディタ内検索を自動起動
+    setTimeout(() => {
+      execSearch(fullsearchQuery);
+    }, 100);
+
+  } catch (e) {
+    showToast('文書を開けませんでした');
+    console.error('Fullsearch open error:', e);
+  }
+}
+
+// ── 結果一覧に戻る ──
+function backToFullsearchResults() {
+  closeSearchNav();
+  fullsearchNavHeader.classList.remove('active');
+  document.querySelector('.header').style.display = '';
+  openMenu();
+  openFullsearchPanel(false, true);
+  fullsearchHistoryDepth = 1;
+}
+
+// ── イベント登録 ──
+$('fullsearchClose').addEventListener('click', closeFullsearchMode);
+$('fullsearchGo').addEventListener('click', () => execFullsearch(fullsearchInput.value.trim()));
+fullsearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); execFullsearch(fullsearchInput.value.trim()); }
+});
+$('fullsearchClear').addEventListener('click', () => { fullsearchInput.value = ''; fullsearchInput.focus(); });
+$('fullsearchBack').addEventListener('click', () => history.back());
+
+// ── 戻るボタン（ブラウザ履歴）で全文検索ステップを戻る ──
+window.addEventListener('popstate', (e) => {
+  if (fsIgnorePopstate) {
+    fsIgnorePopstate = false;
+    return;
+  }
+  if (fullsearchHistoryDepth <= 0) return;
+
+  if (fullsearchHistoryDepth === 2) {
+    // ファイル閲覧 → 結果一覧に戻る
+    fullsearchHistoryDepth = 1;
+    backToFullsearchResults();
+  } else if (fullsearchHistoryDepth === 1) {
+    // 結果一覧 → ハンバーガーメニューに戻る
+    fullsearchHistoryDepth = 0;
+    closeFullsearchPanel();
+    fullsearchMode = false;
+    fullsearchNavHeader.classList.remove('active');
+    document.querySelector('.header').style.display = '';
+    closeSearchNav();
+    openMenu();
+  }
+});
+
+
 // ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════
 
 const menuOverlay       = $('menuOverlay');
@@ -2722,16 +3778,29 @@ const menuHistory       = $('menuHistory');
 const nameDialogOverlay = $('nameDialogOverlay');
 const nameDialogInput   = $('nameDialogInput');
 const nameDialogTitle   = $('nameDialogTitle');
+const importFileInput   = $('importFileInput');
+const impExpOverlay     = $('impExpOverlay');
 
 function openMenu() {
   menuOverlay.classList.add('active');
   menuPanel.classList.add('active');
+  if (!panelHistoryState) {
+    panelHistoryState = 'menu';
+    history.pushState({ panel: 'menu' }, '');
+  }
   loadMenuHistory();
 }
 
-function closeMenu() {
+function closeMenu(skipHistory) {
   menuPanel.classList.remove('active');
   menuOverlay.classList.remove('active');
+  if (panelHistoryState === 'menu') {
+    panelHistoryState = null;
+    if (!skipHistory) {
+      panelPopstateIgnore = true;
+      history.back();
+    }
+  }
 }
 
 menuOverlay.addEventListener('click', closeMenu);
@@ -2759,6 +3828,20 @@ function showNameDialog(title, defaultValue) {
     nameDialogInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); onOk(); } };
   });
 }
+
+// ── インポート／エクスポート選択モーダル ──
+function openImpExpModal() {
+  impExpOverlay.classList.add('active');
+}
+
+function closeImpExpModal() {
+  impExpOverlay.classList.remove('active');
+}
+
+$('impExpExport').addEventListener('click', () => { closeImpExpModal(); doExport(); });
+$('impExpImport').addEventListener('click', () => { closeImpExpModal(); doImport(); });
+$('impExpCancel').addEventListener('click', closeImpExpModal);
+impExpOverlay.addEventListener('click', (e) => { if (e.target === impExpOverlay) closeImpExpModal(); });
 
 async function doSave() {
   const tab = getActiveTab();
@@ -2808,6 +3891,160 @@ async function doNewDoc() {
   showToast('新しいタブを開きました');
 }
 
+// ── 共有（.txt） ──
+async function doShareTxt() {
+  const tab = getActiveTab();
+  if (!tab) return;
+  const content = editor.value;
+  if (!content.trim()) {
+    showToast('テキストが空です');
+    return;
+  }
+  const defaultName = tab.docName || '無題';
+  const name = await showNameDialog('共有するファイル名', defaultName);
+  if (!name) return;
+
+  const fileName = name.endsWith('.txt') ? name : name + '.txt';
+  const file = new File([content], fileName, { type: 'text/plain' });
+
+  if (!navigator.canShare || !navigator.canShare({ files: [file] })) {
+    showToast('この端末では共有できません');
+    return;
+  }
+  try {
+    await navigator.share({ files: [file] });
+    showToast('共有しました');
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      showToast('共有に失敗しました');
+      console.error('Share error:', e);
+    }
+  }
+}
+
+// ── エクスポート ──
+async function doExport() {
+  try {
+    const docs = await getAllDocs();
+    const folders = await getAllFolders();
+    const customTemplates = await getAllCustomTemplates();
+
+    const exportData = {
+      appName: 'PEGmemo',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      docs: docs,
+      folders: folders,
+      customTemplates: customTemplates
+    };
+
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const now = new Date();
+    const dateStr = now.getFullYear() +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      String(now.getDate()).padStart(2, '0') + '_' +
+      String(now.getHours()).padStart(2, '0') +
+      String(now.getMinutes()).padStart(2, '0');
+    const defaultName = 'PEGmemo_backup_' + dateStr;
+
+    const name = await showNameDialog('エクスポートファイル名', defaultName);
+    if (!name) return;
+
+    const fileName = name.endsWith('.json') ? name : name + '.json';
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('エクスポートしました');
+  } catch (e) {
+    showToast('エクスポートに失敗しました');
+    console.error('Export error:', e);
+  }
+}
+
+// ── インポート ──
+function doImport() {
+  importFileInput.value = '';
+  importFileInput.click();
+}
+
+importFileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (data.appName !== 'PEGmemo') {
+      showToast('PEGメモのバックアップファイルではありません');
+      return;
+    }
+
+    let countDocs = 0;
+    let countFolders = 0;
+    let countTemplates = 0;
+
+    // フォルダをインポート（旧ID→新IDの対応表を作る）
+    const folderIdMap = {};
+    if (data.folders && data.folders.length > 0) {
+      for (const f of data.folders) {
+        const newFolder = await saveNewFolder(f.name);
+        folderIdMap[f.id] = newFolder.id;
+        countFolders++;
+      }
+    }
+
+    // 文書をインポート（folderIdを新IDに変換）
+    if (data.docs && data.docs.length > 0) {
+      for (const d of data.docs) {
+        const doc = await saveNewDoc(d.name, d.content);
+        const newFolderId = d.folderId ? (folderIdMap[d.folderId] || null) : null;
+        if (newFolderId) {
+          await updateDoc(doc.id, { folderId: newFolderId });
+        }
+        countDocs++;
+      }
+    }
+
+    // カスタムテンプレートをインポート
+    if (data.customTemplates && data.customTemplates.length > 0) {
+      for (const t of data.customTemplates) {
+        await saveNewCustomTemplate(t.title, t.content);
+        countTemplates++;
+      }
+    }
+
+    const parts = [];
+    if (countDocs > 0) parts.push('文書 ' + countDocs + '件');
+    if (countFolders > 0) parts.push('フォルダ ' + countFolders + '件');
+    if (countTemplates > 0) parts.push('テンプレート ' + countTemplates + '件');
+
+    if (parts.length > 0) {
+      showToast('インポート完了: ' + parts.join('、'));
+    } else {
+      showToast('インポートするデータがありませんでした');
+    }
+  } catch (e) {
+    showToast('インポートに失敗しました');
+    console.error('Import error:', e);
+  }
+});
+
+// 共有非対応チェック（起動時にボタンを無効化）
+if (!navigator.canShare) {
+  const shareBtn = $('menuShare');
+  if (shareBtn) {
+    shareBtn.disabled = true;
+    shareBtn.textContent = '共有（非対応）';
+  }
+}
+
 async function loadMenuHistory() {
   menuHistory.innerHTML = '';
   try {
@@ -2846,7 +4083,42 @@ async function loadMenuHistory() {
 
       btn.appendChild(nameSpan);
       btn.appendChild(dateSpan);
-      btn.addEventListener('click', () => openDocFromHistory(doc.id));
+
+      // 長押しで文書ポップアップ（ライブラリと同じ機能）
+      let histLpTimer = null;
+      let histLpFired = false;
+      btn.addEventListener('contextmenu', (e) => { e.preventDefault(); });
+      btn.addEventListener('touchstart', (e) => {
+        histLpFired = false;
+        document.body.classList.add('no-select');
+        const touch = e.touches[0];
+        const tx = touch.clientX, ty = touch.clientY;
+        histLpTimer = setTimeout(() => {
+          histLpFired = true;
+          histLpTimer = null;
+          window.getSelection().removeAllRanges();
+          showDocPopup(doc, tx, ty);
+          requestAnimationFrame(() => { window.getSelection().removeAllRanges(); });
+        }, 500);
+      }, { passive: false });
+      btn.addEventListener('touchend', (e) => {
+        document.body.classList.remove('no-select');
+        if (histLpFired) { e.preventDefault(); histLpFired = false; return; }
+        clearTimeout(histLpTimer);
+        histLpTimer = null;
+      });
+      btn.addEventListener('touchmove', () => {
+        if (!histLpFired) { clearTimeout(histLpTimer); histLpTimer = null; }
+      });
+      btn.addEventListener('touchcancel', () => {
+        document.body.classList.remove('no-select');
+        if (!histLpFired) { clearTimeout(histLpTimer); histLpTimer = null; }
+      });
+
+      btn.addEventListener('click', () => {
+        if (histLpFired) return;
+        openDocFromHistory(doc.id);
+      });
       menuHistory.appendChild(btn);
     });
   } catch (e) {
@@ -2899,11 +4171,14 @@ async function openDocFromHistory(id) {
 $('menuSave').addEventListener('click', async () => { closeMenu(); await doSave(); });
 $('menuSaveAs').addEventListener('click', async () => { closeMenu(); await doSaveAs(); });
 $('menuNewDoc').addEventListener('click', async () => { closeMenu(); await doNewDoc(); });
+$('menuShare').addEventListener('click', async () => { closeMenu(); await doShareTxt(); });
+$('menuImpExp').addEventListener('click', () => { closeMenu(); openImpExpModal(); });
 
 // タブパネル内ボタン
 $('tabPanelNewDoc').addEventListener('click', async () => { closeTabPanel(); await doNewDoc(); });
 $('tabPanelSave').addEventListener('click', async () => { closeTabPanel(); await doSave(); });
 $('tabPanelSaveAs').addEventListener('click', async () => { closeTabPanel(); await doSaveAs(); });
+$('menuSearch').addEventListener('click', () => { closeMenu(true); openFullsearchPanel(); });
 
 
 // ══════════════ #LIBRARY ライブラリパネル（全文書一覧・フォルダ・ソート） ══════════════
@@ -3442,6 +4717,7 @@ async function renameDocAction(doc) {
     }
     showToast('ファイル名を変更しました');
     renderLibrary();
+    loadMenuHistory();
   } catch (e) {
     showToast('名前変更に失敗しました');
     console.error('Rename doc error:', e);
@@ -3460,27 +4736,16 @@ async function duplicateDocAction(doc) {
     }
     showToast('「' + newName + '」を作成しました');
     renderLibrary();
+    loadMenuHistory();
   } catch (e) {
     showToast('複製に失敗しました');
     console.error('Duplicate doc error:', e);
   }
 }
 
-async function moveDocToFolderAction(doc) {
-  try {
-    const folders = await getAllFolders();
-    if (folders.length === 0 && !doc.folderId) {
-      showToast('フォルダがありません。先にフォルダを作成してください');
-      return;
-    }
-    showFolderSelectModal(doc, folders);
-  } catch (e) {
-    showToast('フォルダ情報の取得に失敗しました');
-    console.error('Move doc error:', e);
-  }
-}
-
 async function deleteDocAction(doc) {
+  closeMenu();
+  closeLibrary();
   showLibConfirm(
     '文書を削除しますか？',
     '「' + (doc.name || '無題') + '」を削除します。\nこの操作は取り消せません。',
@@ -3496,6 +4761,7 @@ async function deleteDocAction(doc) {
         await deleteDoc(doc.id);
         showToast('文書を削除しました');
         renderLibrary();
+        loadMenuHistory();
       } catch (e) {
         showToast('削除に失敗しました');
         console.error('Delete doc error:', e);
@@ -3504,20 +4770,53 @@ async function deleteDocAction(doc) {
   );
 }
 
+async function moveDocToFolderAction(doc) {
+  try {
+    const folders = await getAllFolders();
+    if (folders.length === 0 && !doc.folderId) {
+      showToast('フォルダがありません。先にフォルダを作成してください');
+      return;
+    }
+    const wasMenuOpen = menuPanel.classList.contains('active');
+    const wasLibraryOpen = libraryPanel.classList.contains('active');
+    closeMenu();
+    closeLibrary();
+    showFolderSelectModal(doc, folders, () => {
+      if (wasMenuOpen) openMenu();
+      else if (wasLibraryOpen) openLibrary();
+    });
+  } catch (e) {
+    showToast('フォルダ情報の取得に失敗しました');
+    console.error('Move doc error:', e);
+  }
+}
+
 // --- フォルダ移動モーダル ---
-function showFolderSelectModal(doc, folders) {
+function showFolderSelectModal(doc, folders, onDone) {
   const overlay = $('folderSelectOverlay');
   const list = $('folderSelectList');
   const cancelBtn = $('folderSelectCancel');
   list.innerHTML = '';
+
+  // タイトルにファイル名を表示
+  const titleEl = overlay.querySelector('.folder-select-title');
+  titleEl.textContent = '「' + (doc.name || '無題') + '」の移動先';
 
   function cleanup() {
     overlay.classList.remove('active');
     overlay.removeEventListener('click', onBgClick);
     cancelBtn.removeEventListener('click', onCancel);
   }
-  function onBgClick(e) { if (e.target === overlay) cleanup(); }
-  function onCancel() { cleanup(); }
+  function onBgClick(e) {
+    if (e.target === overlay) {
+      cleanup();
+      if (onDone) onDone();
+    }
+  }
+  function onCancel() {
+    cleanup();
+    if (onDone) onDone();
+  }
   overlay.addEventListener('click', onBgClick);
   cancelBtn.addEventListener('click', onCancel);
 
@@ -3537,15 +4836,19 @@ function showFolderSelectModal(doc, folders) {
       cleanup();
       if (doc.folderId === folder.id) {
         showToast('既にこのフォルダ内です');
+        if (onDone) onDone();
         return;
       }
       try {
         await updateDoc(doc.id, { folderId: folder.id });
         showToast('「' + folder.name + '」に移動しました');
         renderLibrary();
+        loadMenuHistory();
+        if (onDone) onDone();
       } catch (e) {
         showToast('移動に失敗しました');
         console.error('Move doc error:', e);
+        if (onDone) onDone();
       }
     });
     list.appendChild(btn);
@@ -3564,15 +4867,19 @@ function showFolderSelectModal(doc, folders) {
     cleanup();
     if (!doc.folderId) {
       showToast('フォルダに所属していません');
+      if (onDone) onDone();
       return;
     }
     try {
       await updateDoc(doc.id, { folderId: null });
       showToast('フォルダから取り出しました');
       renderLibrary();
+      loadMenuHistory();
+      if (onDone) onDone();
     } catch (e) {
       showToast('移動に失敗しました');
       console.error('Remove from folder error:', e);
+      if (onDone) onDone();
     }
   });
   list.appendChild(removeBtn);
@@ -3593,11 +4900,22 @@ function openTabPanel() {
   renderTabList();
   tabOverlay.classList.add('active');
   tabPanel.classList.add('active');
+  if (!panelHistoryState) {
+    panelHistoryState = 'tabPanel';
+    history.pushState({ panel: 'tabPanel' }, '');
+  }
 }
 
-function closeTabPanel() {
+function closeTabPanel(skipHistory) {
   tabPanel.classList.remove('active');
   tabOverlay.classList.remove('active');
+  if (panelHistoryState === 'tabPanel') {
+    panelHistoryState = null;
+    if (!skipHistory) {
+      panelPopstateIgnore = true;
+      history.back();
+    }
+  }
 }
 
 tabOverlay.addEventListener('click', closeTabPanel);
@@ -3740,7 +5058,7 @@ function setupSwipeMenu() {
   let startY = 0;
   let tracking = false;
   let isHorizontal = null;
-  let swipeTarget = null;  // 'menu' or 'tab' or 'library'
+  let swipeTarget = null;  // 'menu' or 'tab' or 'library' or 'fullsearch'
 
   const THRESHOLD = 50;
 
@@ -3762,10 +5080,31 @@ function setupSwipeMenu() {
     libraryPanel.style.transform = `translateX(${Math.min(0, Math.max(-pw, x))}px)`;
   }
 
+  function setTrackingFullsearch(x) {
+    fullsearchPanel.style.transition = 'none';
+    const pw = fullsearchPanel.offsetWidth;
+    fullsearchPanel.style.transform = `translateX(${Math.min(0, Math.max(-pw, x))}px)`;
+  }
+
   function settleMenu(open) {
     menuPanel.style.transition = '';
     menuPanel.style.transform = '';
-    open ? openMenu() : closeMenu();
+    if (open) {
+      openMenu();
+    } else {
+      closeMenu();
+      if (fullsearchMode) {
+        fullsearchMode = false;
+        fullsearchNavHeader.classList.remove('active');
+        document.querySelector('.header').style.display = '';
+        closeSearchNav();
+        if (fullsearchHistoryDepth > 0) {
+          fsIgnorePopstate = true;
+          history.go(-fullsearchHistoryDepth);
+          fullsearchHistoryDepth = 0;
+        }
+      }
+    }
   }
 
   function settleTab(open) {
@@ -3782,6 +5121,23 @@ function setupSwipeMenu() {
     } else {
       closeLibrary();
       openMenu();
+    }
+  }
+
+  function settleFullsearch(open) {
+    fullsearchPanel.style.transition = '';
+    fullsearchPanel.style.transform = '';
+    if (open) {
+      openFullsearchPanel(false, true);
+    } else {
+      closeFullsearchPanel();
+      openMenu();
+      if (fullsearchHistoryDepth > 0) {
+        fsIgnorePopstate = true;
+        history.go(-fullsearchHistoryDepth);
+        fullsearchHistoryDepth = 0;
+        fullsearchMode = false;
+      }
     }
   }
 
@@ -3822,14 +5178,17 @@ function setupSwipeMenu() {
 
     if (!isHorizontal) return;
 
-    const menuIsOpen    = menuPanel.classList.contains('active');
-    const tabIsOpen     = tabPanel.classList.contains('active');
-    const libraryIsOpen = libraryPanel.classList.contains('active');
+    const menuIsOpen       = menuPanel.classList.contains('active');
+    const tabIsOpen        = tabPanel.classList.contains('active');
+    const libraryIsOpen    = libraryPanel.classList.contains('active');
+    const fullsearchIsOpen = fullsearchPanel.classList.contains('active');
 
     if (swipeTarget === null) {
-      if (libraryIsOpen && dx < 0) {
+      if (fullsearchIsOpen && dx < 0) {
+        swipeTarget = 'fullsearch';
+      } else if (libraryIsOpen && dx < 0) {
         swipeTarget = 'library';
-      } else if (!menuIsOpen && !tabIsOpen && !libraryIsOpen) {
+      } else if (!menuIsOpen && !tabIsOpen && !libraryIsOpen && !fullsearchIsOpen) {
         swipeTarget = dx > 0 ? 'menu' : 'tab';
       } else if (menuIsOpen && dx < 0) {
         swipeTarget = 'menu';
@@ -3862,6 +5221,11 @@ function setupSwipeMenu() {
       if (libraryIsOpen && dx < 0) {
         setTrackingLibrary(Math.max(-libWidth, dx));
       }
+    } else if (swipeTarget === 'fullsearch') {
+      const fsWidth = fullsearchPanel.offsetWidth;
+      if (fullsearchIsOpen && dx < 0) {
+        setTrackingFullsearch(Math.max(-fsWidth, dx));
+      }
     }
   }, { passive: false });
 
@@ -3873,10 +5237,10 @@ function setupSwipeMenu() {
 
     // 縦移動が横移動の半分以上あればスクロールとみなしてキャンセル
     if (Math.abs(dy) > Math.abs(dx) * 0.5) {
-      // パネルが追従している場合は元の状態に戻す
       if (swipeTarget === 'menu') settleMenu(menuPanel.classList.contains('active'));
       else if (swipeTarget === 'tab') settleTab(tabPanel.classList.contains('active'));
       else if (swipeTarget === 'library') settleLibrary(libraryPanel.classList.contains('active'));
+      else if (swipeTarget === 'fullsearch') settleFullsearch(fullsearchPanel.classList.contains('active'));
       swipeTarget = null;
       return;
     }
@@ -3895,6 +5259,10 @@ function setupSwipeMenu() {
       const libraryIsOpen = libraryPanel.classList.contains('active');
       if (libraryIsOpen && dx < -THRESHOLD) settleLibrary(false);
       else settleLibrary(libraryIsOpen);
+    } else if (swipeTarget === 'fullsearch') {
+      const fullsearchIsOpen = fullsearchPanel.classList.contains('active');
+      if (fullsearchIsOpen && dx < -THRESHOLD) settleFullsearch(false);
+      else settleFullsearch(fullsearchIsOpen);
     }
 
     swipeTarget = null;
@@ -4501,6 +5869,35 @@ function escapeHtml(text) {
 }
 
 
+// ══════════════ #MODAL HTML出力モーダル ══════════════
+
+btnHtmlOutput.addEventListener('click', () => {
+  // タブパネルが開いていれば閉じる
+  if (tabPanel.classList.contains('active')) closeTabPanel();
+  const html = convertToHtml(editor.value);
+  htmlOutput.value = html;
+  htmlModal.classList.add('active');
+  setTimeout(() => {
+    htmlOutput.style.height = 'auto';
+    htmlOutput.style.height = Math.min(htmlOutput.scrollHeight, 400) + 'px';
+  }, 50);
+});
+
+$('btnCopyHtml').addEventListener('click', () => {
+  navigator.clipboard.writeText(htmlOutput.value).then(() => {
+    showToast('HTMLをコピーしました');
+  }).catch(() => {
+    htmlOutput.select();
+    document.execCommand('copy');
+    showToast('HTMLをコピーしました');
+  });
+});
+
+$('btnCloseModal').addEventListener('click', () => htmlModal.classList.remove('active'));
+$('btnCloseModal2').addEventListener('click', () => htmlModal.classList.remove('active'));
+htmlModal.addEventListener('click', (e) => { if (e.target === htmlModal) htmlModal.classList.remove('active'); });
+
+
 // ══════════════ #MODAL タブ名編集モーダル（＝ファイル名編集） ══════════════
 
 const renameModal  = $('renameModal');
@@ -4557,6 +5954,9 @@ renameInput.addEventListener('keydown', (e) => {
 
 // ══════════════ #INIT 初期化 ══════════════
 
+let panelHistoryState = null;    // 'menu' | 'tabPanel' | null
+let panelPopstateIgnore = false; // closeMenu/closeTabPanel からの history.back() を無視するフラグ
+
 function setupViewportFix() {
   if (!window.visualViewport) return;
   const app = document.querySelector('.app');
@@ -4569,10 +5969,32 @@ function setupBackButton() {
   history.replaceState({ editor: true }, '');
 
   window.addEventListener('popstate', (e) => {
+    // closeMenu / closeTabPanel が history.back() した時の popstate → 無視
+    if (panelPopstateIgnore) {
+      panelPopstateIgnore = false;
+      return;
+    }
+    // メニューが開いている → 戻るボタンで閉じる
+    if (panelHistoryState === 'menu') {
+      panelHistoryState = null;
+      menuPanel.classList.remove('active');
+      menuOverlay.classList.remove('active');
+      history.pushState({ editor: true }, '');
+      return;
+    }
+    // タブパネルが開いている → 戻るボタンで閉じる
+    if (panelHistoryState === 'tabPanel') {
+      panelHistoryState = null;
+      tabPanel.classList.remove('active');
+      tabOverlay.classList.remove('active');
+      history.pushState({ editor: true }, '');
+      return;
+    }
+    // プレビューが開いている → 閉じる（既存処理）
     if (App.isPreview) {
       closePreview();
     } else {
-      // ブラウザバック防止のみ（タブは閉じない）
+      // ブラウザバック防止
       history.pushState({ editor: true }, '');
     }
   });
