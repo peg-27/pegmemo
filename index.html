@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F7E9F6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#F7E9F6" media="(prefers-color-scheme: dark)">
 <title>PEG memo</title>
 <link rel="manifest" href="/pegmemo/manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="/pegmemo/icon-192.png">
@@ -181,7 +181,7 @@ function showUpdateNotification(newWorker) {
   .header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     padding: 8px 12px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
@@ -230,9 +230,9 @@ function showUpdateNotification(newWorker) {
     width: 36px;
     height: 36px;
     padding: 0;
-    border: 1px solid var(--border-btn);
+    border: none;
     border-radius: 6px;
-    background: var(--surface);
+    background: transparent;
     cursor: pointer;
     flex-shrink: 0;
   }
@@ -266,6 +266,7 @@ function showUpdateNotification(newWorker) {
     box-sizing: border-box;
     align-self: center;
     line-height: 1;
+    margin-left: 8px;
   }
   /* プレビュー・HTML出力ボタン */
   .btn-header-action {
@@ -275,9 +276,9 @@ function showUpdateNotification(newWorker) {
     width: 40px;
     height: 36px;
     padding: 0;
-    border: 1px solid var(--border-btn);
+    border: none;
     border-radius: 6px;
-    background: var(--surface);
+    background: transparent;
     cursor: pointer;
     flex-shrink: 0;
     overflow: hidden;
@@ -285,7 +286,7 @@ function showUpdateNotification(newWorker) {
   .btn-header-action:active { background: var(--btn-hover); }
   .btn-header-action.btn-accent {
     background: var(--accent);
-    border-color: var(--accent);
+    border: none;
   }
   .btn-header-action.btn-accent:active { opacity: 0.8; }
   .btn-header-action svg {
@@ -366,8 +367,8 @@ function showUpdateNotification(newWorker) {
     font-size: 12px;
     padding: 5px 10px;
     min-height: 30px;
-    border-color: var(--border-light);
-    background: var(--surface);
+    border: none;
+    background: transparent;
     flex-shrink: 0;
   }
   .toolbar .btn:hover, .toolbar .btn:active {
@@ -386,9 +387,9 @@ function showUpdateNotification(newWorker) {
     font-size: 12px;
     font-family: inherit;
     padding: 5px 6px;
-    border: 1px solid var(--border-light);
+    border: none;
     border-radius: 6px;
-    background: var(--surface);
+    background: transparent;
     color: var(--text);
     min-height: 30px;
     flex-shrink: 0;
@@ -467,6 +468,7 @@ function showUpdateNotification(newWorker) {
     </div>
     <div class="toolbar-sep"></div>
     <button class="btn" id="btnCustomTpl" title="カスタムテンプレート">カスタム</button>
+    <div class="toolbar-sep"></div>
     <div class="toolbar-spacer"></div>
     <span class="toolbar-charcount" id="charCount">0 文字</span>
   </div>
@@ -2047,10 +2049,10 @@ function showUpdateNotification(newWorker) {
     font-size: 13px;
   }
 
-  /* --- 新規文書作成ボタン（ピンク背景） --- */
+  /* --- 新規文書ボタン（ピンク背景） --- */
   .tab-panel-actions .btn-pink {
-    background: #F48FB1;
-    border-color: #F48FB1;
+    background: #F2A2C0;
+    border-color: #F2A2C0;
     color: #fff;
   }
   .tab-panel-actions .btn-pink:active { opacity: 0.8; }
@@ -2095,7 +2097,7 @@ function showUpdateNotification(newWorker) {
 
   <!-- 下部アクションボタン群（2×2グリッド） -->
   <div class="tab-panel-actions">
-    <button class="btn btn-pink" id="tabPanelNewDoc">新規文書作成</button>
+    <button class="btn btn-pink" id="tabPanelNewDoc">新規文書</button>
     <button class="btn" id="tabPanelSaveAs">別名保存</button>
     <button class="btn" id="tabPanelSave">上書き保存</button>
     <button class="btn btn-accent btn-html-output" id="btnHtmlOutput" title="HTML出力">
@@ -3058,8 +3060,8 @@ function findTabByDocId(docId) {
 
 function updateCharCount() {
   const text = editor.value;
-  const stripped = text.replace(/<[^>]*>/g, '').replace(/\n/g, '');
-  charCount.textContent = stripped.length + ' 文字';
+  const stripped = text.replace(/<[^>]*>/g, '').replace(/\n/g, '').replace(/[ 　]/g, '');
+  charCount.textContent = stripped.length;
 }
 
 
@@ -3742,9 +3744,8 @@ async function openDocFromFullsearch(docId) {
       }
     }
 
-    // パネルとメニューを閉じる
+    // パネルだけ閉じる（メニューはそのまま）
     closeFullsearchPanel();
-    closeMenu();
 
     // ヘッダー差し替え
     document.querySelector('.header').style.display = 'none';
@@ -3771,7 +3772,6 @@ function backToFullsearchResults() {
   closeSearchNav();
   fullsearchNavHeader.classList.remove('active');
   document.querySelector('.header').style.display = '';
-  openMenu();
   openFullsearchPanel(false, true);
   fullsearchHistoryDepth = 1;
 }
@@ -3794,18 +3794,15 @@ window.addEventListener('popstate', (e) => {
   if (fullsearchHistoryDepth <= 0) return;
 
   if (fullsearchHistoryDepth === 2) {
-    // ファイル閲覧 → 結果一覧に戻る
     fullsearchHistoryDepth = 1;
     backToFullsearchResults();
   } else if (fullsearchHistoryDepth === 1) {
-    // 結果一覧 → ハンバーガーメニューに戻る
     fullsearchHistoryDepth = 0;
     closeFullsearchPanel();
     fullsearchMode = false;
     fullsearchNavHeader.classList.remove('active');
     document.querySelector('.header').style.display = '';
     closeSearchNav();
-    openMenu();
   }
 });
 
@@ -4208,17 +4205,17 @@ async function openDocFromHistory(id) {
   }
 }
 
-$('menuSave').addEventListener('click', async () => { closeMenu(); await doSave(); });
-$('menuSaveAs').addEventListener('click', async () => { closeMenu(); await doSaveAs(); });
-$('menuNewDoc').addEventListener('click', async () => { closeMenu(); await doNewDoc(); });
-$('menuShare').addEventListener('click', async () => { closeMenu(); await doShareTxt(); });
-$('menuImpExp').addEventListener('click', () => { closeMenu(); openImpExpModal(); });
+$('menuSave').addEventListener('click', async () => { await doSave(); });
+$('menuSaveAs').addEventListener('click', async () => { await doSaveAs(); });
+$('menuNewDoc').addEventListener('click', async () => { await doNewDoc(); });
+$('menuShare').addEventListener('click', async () => { await doShareTxt(); });
+$('menuImpExp').addEventListener('click', () => { openImpExpModal(); });
 
 // タブパネル内ボタン
-$('tabPanelNewDoc').addEventListener('click', async () => { closeTabPanel(); await doNewDoc(); });
-$('tabPanelSave').addEventListener('click', async () => { closeTabPanel(); await doSave(); });
-$('tabPanelSaveAs').addEventListener('click', async () => { closeTabPanel(); await doSaveAs(); });
-$('menuSearch').addEventListener('click', () => { closeMenu(true); openFullsearchPanel(); });
+$('tabPanelNewDoc').addEventListener('click', async () => { await doNewDoc(); });
+$('tabPanelSave').addEventListener('click', async () => { await doSave(); });
+$('tabPanelSaveAs').addEventListener('click', async () => { await doSaveAs(); });
+$('menuSearch').addEventListener('click', () => { openFullsearchPanel(); });
 
 
 // ══════════════ #LIBRARY ライブラリパネル（全文書一覧・フォルダ・ソート） ══════════════
@@ -5133,17 +5130,6 @@ function setupSwipeMenu() {
       openMenu();
     } else {
       closeMenu();
-      if (fullsearchMode) {
-        fullsearchMode = false;
-        fullsearchNavHeader.classList.remove('active');
-        document.querySelector('.header').style.display = '';
-        closeSearchNav();
-        if (fullsearchHistoryDepth > 0) {
-          fsIgnorePopstate = true;
-          history.go(-fullsearchHistoryDepth);
-          fullsearchHistoryDepth = 0;
-        }
-      }
     }
   }
 
@@ -5171,13 +5157,11 @@ function setupSwipeMenu() {
       openFullsearchPanel(false, true);
     } else {
       closeFullsearchPanel();
-      openMenu();
-      if (fullsearchHistoryDepth > 0) {
-        fsIgnorePopstate = true;
-        history.go(-fullsearchHistoryDepth);
-        fullsearchHistoryDepth = 0;
-        fullsearchMode = false;
+      if (!menuPanel.classList.contains('active')) {
+        openMenu();
       }
+      fullsearchHistoryDepth = 0;
+      fullsearchMode = false;
     }
   }
 
@@ -6012,6 +5996,10 @@ function setupBackButton() {
     // closeMenu / closeTabPanel が history.back() した時の popstate → 無視
     if (panelPopstateIgnore) {
       panelPopstateIgnore = false;
+      return;
+    }
+    // 全文検索の history.go による popstate → 無視
+    if (fsIgnorePopstate) {
       return;
     }
     // メニューが開いている → 戻るボタンで閉じる
