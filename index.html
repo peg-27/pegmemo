@@ -1392,7 +1392,7 @@ function showUpdateNotification(newWorker) {
   <button class="menu-item" id="menuNewDoc">新規文書</button>
   <button class="menu-item" id="menuSave">上書き保存</button>
   <button class="menu-item" id="menuSaveAs">別名保存</button>
-  <button class="menu-item" id="menuShare">共有</button>
+  <button class="menu-item" id="menuShare">共有（端末に保存）</button>
   
   <button class="menu-item" id="menuImpExp">インポート／エクスポート</button>
   <div class="menu-sep"></div>
@@ -2956,6 +2956,28 @@ function deleteCustomTemplate(id) {
 
 // ══════════════ #TAB タブ管理（作成・切替・削除） ══════════════
 
+// 新規ファイルに付ける日時ベースのファイル名を生成（YYMMDDHHmmss の12桁）
+function generateTimestampName() {
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  return yy + mm + dd + hh + mi + ss;
+}
+
+// 開いているタブの中で名前が重複しないようにする
+// （重複していたら末尾に (1)(2)… を付けて返す）
+function uniqueTabName(base) {
+  const existing = App.tabs.map(t => t.docName).filter(Boolean);
+  if (!existing.includes(base)) return base;
+  let n = 1;
+  while (existing.includes(base + ' (' + n + ')')) n++;
+  return base + ' (' + n + ')';
+}
+
 function createTab(docId, docName, content) {
   const tab = {
     tabId: App.nextTabId++,
@@ -2968,6 +2990,11 @@ function createTab(docId, docName, content) {
     redoStack: [],
     isDirty: false,
   };
+  // 新規（ライブラリ未登録 かつ 名前未設定）の場合は
+  // 「無題」ではなく日時ベースの名前を自動付与する
+  if (!tab.docId && !tab.docName) {
+    tab.docName = uniqueTabName(generateTimestampName());
+  }
   App.tabs.push(tab);
   switchTab(tab.tabId);
   return tab;
@@ -3886,6 +3913,7 @@ async function doSave() {
   const content = editor.value;
 
   if (tab.docId) {
+    // 既にライブラリに登録済み → 内容を上書き更新
     try {
       await updateDoc(tab.docId, { content });
       tab.isDirty = false;
@@ -3896,7 +3924,20 @@ async function doSave() {
       console.error('Save error:', e);
     }
   } else {
-    await doSaveAs();
+    // 未登録 → 今のファイル名（日時名）のまま、確認なしでライブラリに新規登録
+    try {
+      const name = tab.docName || generateTimestampName();
+      const doc = await saveNewDoc(name, content);
+      tab.docId = doc.id;
+      tab.docName = doc.name;
+      tab.isDirty = false;
+      updateDocNameDisplay();
+      autosave();
+      showToast('「' + doc.name + '」を保存しました');
+    } catch (e) {
+      showToast('保存に失敗しました');
+      console.error('Save error:', e);
+    }
   }
 }
 
@@ -4781,8 +4822,6 @@ async function duplicateDocAction(doc) {
 }
 
 async function deleteDocAction(doc) {
-  closeMenu();
-  closeLibrary();
   showLibConfirm(
     '文書を削除しますか？',
     '「' + (doc.name || '無題') + '」を削除します。\nこの操作は取り消せません。',
@@ -4814,14 +4853,7 @@ async function moveDocToFolderAction(doc) {
       showToast('フォルダがありません。先にフォルダを作成してください');
       return;
     }
-    const wasMenuOpen = menuPanel.classList.contains('active');
-    const wasLibraryOpen = libraryPanel.classList.contains('active');
-    closeMenu();
-    closeLibrary();
-    showFolderSelectModal(doc, folders, () => {
-      if (wasMenuOpen) openMenu();
-      else if (wasLibraryOpen) openLibrary();
-    });
+    showFolderSelectModal(doc, folders, null);
   } catch (e) {
     showToast('フォルダ情報の取得に失敗しました');
     console.error('Move doc error:', e);
@@ -5031,6 +5063,21 @@ function renderTabList() {
     const nameSpan = document.createElement('span');
     nameSpan.className = 'tab-item-name';
     nameSpan.textContent = tab.docName || '無題';
+
+    // 未登録（ライブラリに入っていない）タブだけ、名前の右上に小さな赤い丸を出す
+    if (tab.docId === null) {
+      const badge = document.createElement('span');
+      badge.style.display = 'inline-block';
+      badge.style.width = '5px';
+      badge.style.height = '5px';
+      badge.style.borderRadius = '50%';
+      badge.style.background = 'var(--danger)';
+      badge.style.marginLeft = '5px';
+      badge.style.position = 'relative';
+      badge.style.top = '-2px';
+      badge.title = '未保存（ライブラリ未登録）';
+      nameSpan.appendChild(badge);
+    }
 
     // 長押し検出
     let longPressTimer = null;
@@ -5950,17 +5997,32 @@ async function confirmRename() {
   // タブの状態を更新
   tab.docName = newName;
   updateDocNameDisplay();
-  // 既存ファイル（docIdあり）ならDBも更新
+
   if (tab.docId !== null) {
+    // 既にライブラリにある → 名前だけ更新（新しい項目は作らない）
     try {
       await updateDoc(tab.docId, { name: newName });
       await renderLibrary();
+      renameModal.classList.remove('active');
+      showToast('ファイル名を変更しました');
     } catch (e) {
       showToast('DB更新に失敗しました');
     }
+  } else {
+    // 未登録 → この名前でライブラリに新規登録（決定と同時に保存も完了する）
+    try {
+      const doc = await saveNewDoc(newName, editor.value);
+      tab.docId = doc.id;
+      tab.docName = doc.name;
+      tab.isDirty = false;
+      updateDocNameDisplay();
+      await renderLibrary();
+      renameModal.classList.remove('active');
+      showToast('「' + doc.name + '」を保存しました');
+    } catch (e) {
+      showToast('保存に失敗しました');
+    }
   }
-  renameModal.classList.remove('active');
-  showToast('ファイル名を変更しました');
 }
 
 docNameDisplay.addEventListener('click', () => openRenameModal());
