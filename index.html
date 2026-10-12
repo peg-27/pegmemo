@@ -7,6 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#F7EDF6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#F7EDF6" media="(prefers-color-scheme: dark)">
+<meta name="app-version" content="9">
 <title>PEG memo</title>
 <link rel="manifest" href="/pegmemo/manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="/pegmemo/icon-192.png">
@@ -63,17 +64,20 @@ function showUpdateNotification(newWorker) {
   各ワードでコード内検索するとその機能の先頭に飛べます
 
   #BASE          CSS変数・リセット・レイアウト基盤
-  #HEADER        ヘッダーバー（ファイル名・Undo/Redo）
+  #HEADER        ヘッダーバー（ファイル名・Undo/Redo・ツールバー切替）
   #TOOLBAR       ツールバー（書式ボタン・罫線・テンプレ選択・文字数）
   #SEARCH        エディタ内検索・ライブラリ内検索
-  #PREVIEW       プレビュー表示（HTML/MD切り替え）
+  #SELMODE       範囲選択モード（ヘッダーの点線四角ボタン・コピー／切り取り／削除）
+  #TBTOGGLE      ツールバーの表示／非表示（ヘッダー右端のボタン・状態を記憶）
+  #PREVIEW       プレビュー表示（HTML）
   #EDITOR        テキストエリア本体
+  #SCROLLFAB     ページトップ／ボトムボタン（スクロール中だけ右下に表示）
   #TOAST         トースト通知
   #LEAVE         離脱警告ダイアログ
   #CLOSETAB      未保存タブ閉じ確認ダイアログ
   #MENU          ハンバーガーメニュー（保存・新規・履歴）
   #LIBRARY       ライブラリパネル（全文書一覧・フォルダ・ソート）
-  #TABPANEL      タブパネル（右スライド・タブ切替・タブ閉じ）
+  #TABPANEL      タブパネル（右スライド・タブ切替・タブ閉じ・HTMLプレビューボタン）
   #MODAL         HTML出力モーダル・タブ名編集モーダル
   #CUSTOMTPL     カスタムテンプレート
   #STATE         アプリ状態・DOM参照
@@ -327,6 +331,19 @@ function showUpdateNotification(newWorker) {
       <span class="doc-name untitled" id="docNameDisplay" title="タップしてファイル名を編集">無題</span>
     </div>
     <div class="header-right">
+      <!-- #SELMODE 範囲選択ボタン（点線四角） -->
+      <button class="btn-header-action" id="btnSelMode" title="範囲選択">
+        <svg viewBox="0 0 20 20" fill="none">
+          <line x1="2.8" y1="2.5" x2="7" y2="2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="13" y1="2.5" x2="17.5" y2="2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="17.5" y1="3" x2="17.5" y2="7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="17.5" y1="13" x2="17.5" y2="17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="17.5" y1="17.5" x2="13" y2="17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="2.5" y1="17.5" x2="7" y2="17.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="2.5" y1="17" x2="2.5" y2="13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="2.5" y1="7" x2="2.5" y2="2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
       <!-- エディタ内検索 -->
       <button class="btn-header-action" id="btnSearch" title="検索">
         <svg viewBox="0 0 24 24">
@@ -334,8 +351,14 @@ function showUpdateNotification(newWorker) {
           <line x1="16.5" y1="16.5" x2="21" y2="21"/>
         </svg>
       </button>
-      <!-- プレビュー -->
-      <button class="btn-header-action" id="btnPreview" title="プレビュー">▶</button>
+      <!-- #TBTOGGLE ツールバー表示切替（∨で出す・∧で隠す。プレビュー中は隠れて、代わりに◀が出る） -->
+      <button class="btn-header-action" id="btnToolbarToggle" title="ツールバーの表示／非表示">
+        <svg viewBox="0 0 24 24">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      <!-- プレビュー中だけ表示：編集画面に戻る -->
+      <button class="btn-header-action" id="btnPreviewBack" title="編集に戻る" style="display:none;">◀</button>
     </div>
   </div>
 
@@ -437,6 +460,40 @@ function showUpdateNotification(newWorker) {
     flex-shrink: 0;
     margin-left: auto;
   }
+
+  /* ── #SELMODE 範囲選択モード ── */
+  /* ヘッダーの範囲選択ボタン（点線四角） */
+  #btnSelMode { color: var(--text); }
+  #btnSelMode svg { width: 20px; height: 20px; }
+  #btnSelMode.sel-active { background: var(--accent); color: #fff; }
+  #btnSelMode.sel-active svg { stroke: #fff; }
+
+  /* ── #TBTOGGLE ツールバー表示切替ボタン ── */
+  /* 隠しているときは下向き矢印（∨）、出しているときは上向き矢印（∧）にする */
+  #btnToolbarToggle svg { transition: transform 0.2s; }
+  #btnToolbarToggle.tb-active svg { transform: rotate(180deg); }
+  /* 選択モード中だけツールバーの代わりに出るバー */
+  .sel-toolbar {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--accent);          /* 選択モード中だと一目で分かるようにアクセントカラー */
+    border-bottom: 1px solid var(--accent-hover);
+    min-height: 42px;
+  }
+  .sel-toolbar.active { display: flex; }
+  .sel-toolbar .btn {
+    font-size: 13px;
+    padding: 5px 18px;
+    min-height: 30px;
+    background: #fff;
+    border-color: #fff;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .sel-toolbar .btn:active { background: var(--accent-light); }
 </style>
 
 <!-- ツールバーHTML -->
@@ -471,6 +528,13 @@ function showUpdateNotification(newWorker) {
     <div class="toolbar-sep"></div>
     <div class="toolbar-spacer"></div>
     <span class="toolbar-charcount" id="charCount">0 文字</span>
+  </div>
+
+<!-- #SELMODE 選択モード用バー（選択モード中だけツールバーの代わりに表示） -->
+  <div class="sel-toolbar" id="selToolbar">
+    <button class="btn" id="btnSelCopy">コピー</button>
+    <button class="btn" id="btnSelCut">切り取り</button>
+    <button class="btn" id="btnSelDelete">削除</button>
   </div>
 
 <!-- 検索ナビバー -->
@@ -906,7 +970,7 @@ function showUpdateNotification(newWorker) {
 </div>
 
 
-<!-- ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════ -->
+<!-- ══════════════ #PREVIEW プレビュー表示（HTML） ══════════════ -->
 <style>
   /* プレビューモード中のインジケーター帯 */
   .preview-indicator {
@@ -942,7 +1006,6 @@ function showUpdateNotification(newWorker) {
   #preview h4 { font-size: 1.05em; margin: 0.8em 0 0.4em; }
   #preview h5 { font-size: 0.95em; margin: 0.6em 0 0.3em; }
   #preview p { margin: 0; padding: 0.75em 0; line-height: 1.8; min-height: 1lh; display: block; }
-  #preview p.spacer { margin: 0.1em 0; line-height: 1.8; }
   #preview blockquote {
     border-left: 3px solid var(--border);
     padding-left: 12px;
@@ -968,7 +1031,6 @@ function showUpdateNotification(newWorker) {
 <!-- プレビューHTML -->
   <div class="preview-indicator" id="previewIndicator">
     <span id="previewModeLabel">HTMLプレビュー</span>
-    <span style="margin-left:8px;font-weight:400;font-size:11px;opacity:0.7">（長押しでMD切替）</span>
   </div>
 
 
@@ -1006,6 +1068,50 @@ function showUpdateNotification(newWorker) {
     overscroll-behavior: contain;    /* ← 追加：スクロール連鎖を遮断 */
   }
   #editor::placeholder { color: var(--text-light); }
+
+  /* ── #SCROLLFAB ページトップ／ボトムボタン ── */
+  /* エディタ領域の右下に置く（キーボードが出てエディタが縮んでも一緒に上がる） */
+  .scroll-fab {
+    position: absolute;
+    right: 14px;
+    bottom: 16px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0;
+    pointer-events: none;            /* 消えている間はタップを素通りさせる */
+    transition: opacity 0.25s;
+  }
+  .scroll-fab.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .scroll-fab-btn {
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 1px solid var(--accent-light);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .scroll-fab-btn:active { background: var(--accent-light); }
+  .scroll-fab-btn svg {
+    width: 22px;
+    height: 22px;
+    stroke: var(--accent);
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
 </style>
 
 <!-- エディターHTML -->
@@ -1013,6 +1119,15 @@ function showUpdateNotification(newWorker) {
     <div class="editor-container">
       <textarea id="editor" placeholder="…"></textarea>
       <div id="preview"></div>
+      <!-- #SCROLLFAB ページトップ／ボトムボタン -->
+      <div class="scroll-fab" id="scrollFab">
+        <button class="scroll-fab-btn" id="btnFabTop" title="いちばん上へ">
+          <svg viewBox="0 0 24 24"><line x1="6" y1="5" x2="18" y2="5"/><polyline points="7,14 12,9 17,14"/><line x1="12" y1="9" x2="12" y2="20"/></svg>
+        </button>
+        <button class="scroll-fab-btn" id="btnFabBottom" title="いちばん下へ">
+          <svg viewBox="0 0 24 24"><line x1="6" y1="19" x2="18" y2="19"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="4" x2="12" y2="15"/></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -2056,6 +2171,7 @@ function showUpdateNotification(newWorker) {
     color: #fff;
   }
   .tab-panel-actions .btn-pink:active { opacity: 0.8; }
+  .tab-panel-actions #tabPanelNewDoc { grid-column: 1 / -1; } /* 1段目を横いっぱいに */
 
   /* --- HTML出力ボタン（アイコンのみ・独自背景色） --- */
   .tab-panel-actions .btn-html-output {
@@ -2074,6 +2190,29 @@ function showUpdateNotification(newWorker) {
     stroke-width: 1.5;
     stroke-linecap: round;
     stroke-linejoin: round;
+  }
+
+  /* --- HTMLプレビューボタン（HTML出力ボタンの右隣・白地に紫の枠） --- */
+  .tab-panel-actions .btn-tab-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border-color: #c49eca;
+  }
+  .tab-panel-actions .btn-tab-preview:active { background: var(--accent-light); }
+  .tab-panel-actions .btn-tab-preview svg {
+    width: 40px;
+    height: 30px;
+    stroke: var(--accent);
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .tab-panel-actions .btn-tab-preview svg .play {
+    fill: #c49eca;
+    stroke: none;
   }
 
 </style>
@@ -2095,16 +2234,24 @@ function showUpdateNotification(newWorker) {
     <div id="tabList"></div>
   </div>
 
-  <!-- 下部アクションボタン群（2×2グリッド） -->
+  <!-- 下部アクションボタン群
+       1段目：新規文書（横いっぱい）
+       2段目：上書き保存・別名保存
+       3段目：HTML出力・HTMLプレビュー -->
   <div class="tab-panel-actions">
     <button class="btn btn-pink" id="tabPanelNewDoc">新規文書</button>
-    <button class="btn" id="tabPanelSaveAs">別名保存</button>
     <button class="btn" id="tabPanelSave">上書き保存</button>
+    <button class="btn" id="tabPanelSaveAs">別名保存</button>
     <button class="btn btn-accent btn-html-output" id="btnHtmlOutput" title="HTML出力">
       <svg viewBox="0 0 24 24" preserveAspectRatio="none" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="17,18 22,12 17,6"/>
         <polyline points="7,6 2,12 7,18"/>
         <line x1="13.5" y1="4" x2="10.5" y2="20"/>
+      </svg>
+    </button>
+    <button class="btn btn-tab-preview" id="btnPreview" title="HTMLプレビュー">
+      <svg viewBox="0 0 32 24">
+        <path class="play" d="M11 4v16l13-8z"/>
       </svg>
     </button>
   </div>
@@ -2501,7 +2648,6 @@ const App = {
   tabs: [],
   activeTabId: null,
   nextTabId: 1,
-  previewMode: 'html',
   isPreview: false,
   inputTimer: null,
   saveTimer: null,
@@ -2627,11 +2773,22 @@ function openDB() {
   });
 }
 
-function saveNewDoc(name, content) {
+// インポート用：元データの日時を Date に変換（不正な値なら fallback を返す）
+function toDateOr(val, fallback) {
+  if (!val) return fallback;
+  const d = val instanceof Date ? val : new Date(val);
+  return isNaN(d.getTime()) ? fallback : d;
+}
+
+// opts（省略可）：{ folderId, createdAt, updatedAt } … インポート時に元の値を引き継ぐ
+function saveNewDoc(name, content, opts) {
+  opts = opts || {};
   if (db) {
     return new Promise((resolve, reject) => {
       const now = new Date();
-      const doc = { name, content, folderId: null, createdAt: now, updatedAt: now };
+      const createdAt = toDateOr(opts.createdAt, now);
+      const updatedAt = toDateOr(opts.updatedAt, createdAt);
+      const doc = { name, content, folderId: opts.folderId || null, createdAt, updatedAt };
       const tx = db.transaction('docs', 'readwrite');
       const store = tx.objectStore('docs');
       const req = store.add(doc);
@@ -2640,7 +2797,9 @@ function saveNewDoc(name, content) {
     });
   } else {
     const now = new Date();
-    const doc = { id: lsNextId(), name, content, folderId: null, createdAt: now, updatedAt: now };
+    const createdAt = toDateOr(opts.createdAt, now);
+    const updatedAt = toDateOr(opts.updatedAt, createdAt);
+    const doc = { id: lsNextId(), name, content, folderId: opts.folderId || null, createdAt, updatedAt };
     const docs = lsGetDocs();
     docs.push(doc);
     lsSaveDocs(docs);
@@ -2750,11 +2909,15 @@ function lsFolderNextId() {
   return id;
 }
 
-function saveNewFolder(name) {
+// opts（省略可）：{ createdAt, updatedAt } … インポート時に元の日時を引き継ぐ
+function saveNewFolder(name, opts) {
+  opts = opts || {};
   if (db) {
     return new Promise((resolve, reject) => {
       const now = new Date();
-      const folder = { name, createdAt: now, updatedAt: now };
+      const createdAt = toDateOr(opts.createdAt, now);
+      const updatedAt = toDateOr(opts.updatedAt, createdAt);
+      const folder = { name, createdAt, updatedAt };
       const tx = db.transaction('folders', 'readwrite');
       const store = tx.objectStore('folders');
       const req = store.add(folder);
@@ -2763,7 +2926,9 @@ function saveNewFolder(name) {
     });
   } else {
     const now = new Date();
-    const folder = { id: lsFolderNextId(), name, createdAt: now, updatedAt: now };
+    const createdAt = toDateOr(opts.createdAt, now);
+    const updatedAt = toDateOr(opts.updatedAt, createdAt);
+    const folder = { id: lsFolderNextId(), name, createdAt, updatedAt };
     const folders = lsGetFolders();
     folders.push(folder);
     lsSaveFolders(folders);
@@ -2876,11 +3041,15 @@ function lsCtplNextId() {
   return id;
 }
 
-function saveNewCustomTemplate(title, content) {
+// opts（省略可）：{ createdAt, updatedAt } … インポート時に元の日時を引き継ぐ
+function saveNewCustomTemplate(title, content, opts) {
+  opts = opts || {};
   if (db) {
     return new Promise((resolve, reject) => {
       const now = new Date();
-      const tpl = { title, content, createdAt: now, updatedAt: now };
+      const createdAt = toDateOr(opts.createdAt, now);
+      const updatedAt = toDateOr(opts.updatedAt, createdAt);
+      const tpl = { title, content, createdAt, updatedAt };
       const tx = db.transaction('customTemplates', 'readwrite');
       const store = tx.objectStore('customTemplates');
       const req = store.add(tpl);
@@ -2889,7 +3058,9 @@ function saveNewCustomTemplate(title, content) {
     });
   } else {
     const now = new Date();
-    const tpl = { id: lsCtplNextId(), title, content, createdAt: now, updatedAt: now };
+    const createdAt = toDateOr(opts.createdAt, now);
+    const updatedAt = toDateOr(opts.updatedAt, createdAt);
+    const tpl = { id: lsCtplNextId(), title, content, createdAt, updatedAt };
     const tpls = lsGetCustomTemplates();
     tpls.push(tpl);
     lsSaveCustomTemplates(tpls);
@@ -2953,6 +3124,59 @@ function deleteCustomTemplate(id) {
   }
 }
 
+// --- 全データの置き換え（バックアップのインポート用） ---
+
+// 配列の各要素に重複しないIDを振る（元のIDが正しければそのまま使う）
+function assignImportIds(list) {
+  const used = new Set();
+  let maxId = 0;
+  list.forEach(item => {
+    const n = Number(item.id);
+    if (Number.isInteger(n) && n > 0 && !used.has(n)) {
+      item.id = n;
+      used.add(n);
+      if (n > maxId) maxId = n;
+    } else {
+      item.id = null;
+    }
+  });
+  list.forEach(item => {
+    if (item.id === null) { maxId++; item.id = maxId; used.add(maxId); }
+  });
+  return maxId;
+}
+
+// 文書・フォルダ・カスタムテンプレートを、すべて消してから data の内容に置き換える
+// IndexedDBでは1つのトランザクションで行うので、途中で失敗した場合は元のデータのまま残る
+function replaceAllData(folders, docs, tpls) {
+  if (db) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(['docs', 'folders', 'customTemplates'], 'readwrite');
+      const dStore = tx.objectStore('docs');
+      const fStore = tx.objectStore('folders');
+      const tStore = tx.objectStore('customTemplates');
+      dStore.clear();
+      fStore.clear();
+      tStore.clear();
+      folders.forEach(f => fStore.put(f));
+      docs.forEach(d => dStore.put(d));
+      tpls.forEach(t => tStore.put(t));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('置き換えが中断されました'));
+    });
+  } else {
+    lsSaveFolders(folders);
+    lsSaveDocs(docs);
+    lsSaveCustomTemplates(tpls);
+    const maxOf = arr => arr.reduce((m, x) => Math.max(m, x.id), 0);
+    localStorage.setItem(LS_FOLDER_NEXTID_KEY, String(maxOf(folders)));
+    localStorage.setItem(LS_NEXTID_KEY, String(maxOf(docs)));
+    localStorage.setItem(LS_CTPL_NEXTID_KEY, String(maxOf(tpls)));
+    return Promise.resolve();
+  }
+}
+
 
 // ══════════════ #TAB タブ管理（作成・切替・削除） ══════════════
 
@@ -3010,6 +3234,8 @@ function saveCurrentTabState() {
 }
 
 function switchTab(tabId) {
+  cancelSelMode(); // 範囲選択モード中なら終了
+  hideScrollFab();
   if (App.activeTabId !== null) {
     saveCurrentTabState();
   }
@@ -3171,28 +3397,55 @@ function restoreState(state) {
   updateCharCount();
 }
 
+// 【Undoスタックの考え方】
+//   undoStack のいちばん上は「今の画面の状態」を表す。
+//   Undo は「いちばん上（今の状態）を Redo 側へ移し、ひとつ下の状態を画面に出す」。
+//   以前は、いちばん上（＝今の状態と同じ内容）をそのまま画面に戻していたため、
+//   1回目のUndoでは見た目が変わらず、2回押さないと戻らなかった。
+
 function undo() {
   const tab = getActiveTab();
-  if (!tab || tab.undoStack.length === 0) return;
+  if (!tab) return;
+  cancelSelMode(); // 範囲選択モード中なら終了
+  clearTimeout(App.inputTimer);
   const current = { text: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
-  tab.redoStack.push(current);
-  restoreState(tab.undoStack.pop());
+  const stack = tab.undoStack;
+  // 入力直後などで今の状態がまだ記録されていなければ、先に記録する
+  if (stack.length === 0 || stack[stack.length - 1].text !== current.text) {
+    stack.push(current);
+  }
+  if (stack.length < 2) { updateUndoButtons(); return; }
+  tab.redoStack.push(stack.pop());
+  restoreState(stack[stack.length - 1]);
   updateUndoButtons();
 }
 
 function redo() {
   const tab = getActiveTab();
   if (!tab || tab.redoStack.length === 0) return;
-  const current = { text: editor.value, start: editor.selectionStart, end: editor.selectionEnd };
-  tab.undoStack.push(current);
-  restoreState(tab.redoStack.pop());
+  cancelSelMode(); // 範囲選択モード中なら終了
+  const stack = tab.undoStack;
+  // Undoのあとに新しく入力していたら、やり直しはできない（入力内容を守る）
+  if (stack.length > 0 && stack[stack.length - 1].text !== editor.value) {
+    clearTimeout(App.inputTimer);
+    saveUndoState(); // 今の状態を記録（Redo履歴はここで消える）
+    return;
+  }
+  const next = tab.redoStack.pop();
+  stack.push(next);
+  restoreState(next);
   updateUndoButtons();
 }
 
 function updateUndoButtons() {
   const tab = getActiveTab();
-  btnUndo.disabled = !tab || tab.undoStack.length === 0;
-  btnRedo.disabled = !tab || tab.redoStack.length === 0;
+  if (!tab) { btnUndo.disabled = true; btnRedo.disabled = true; return; }
+  const stack = tab.undoStack;
+  // 戻れる状態が残っているか（いちばん上は今の状態なので、2つ以上必要）
+  const canUndo = stack.length >= 2 ||
+    (stack.length === 1 && stack[0].text !== editor.value);
+  btnUndo.disabled = !canUndo;
+  btnRedo.disabled = tab.redoStack.length === 0;
 }
 
 editor.addEventListener('input', () => {
@@ -3443,6 +3696,7 @@ function buildSearchHist() {
 // ── 検索実行 ──
 function execSearch(q) {
   if (!q) return;
+  cancelSelMode(); // 範囲選択モード中なら終了
   closeSearchModal();
 
   // 履歴に追加（重複除去・最大5件）
@@ -3533,7 +3787,7 @@ function jumpSearch(idx) {
 // ── 検索ナビを終了してツールバーを通常に戻す ──
 function closeSearchNav() {
   searchNav.classList.remove('active');
-  toolbar.style.display = '';
+  applyToolbarVisibility(); // ツールバーは「出す／隠す」の設定どおりに戻す
   searchMatches = [];
   searchCurIdx = -1;
   editor.removeAttribute('inputmode');
@@ -3834,6 +4088,256 @@ window.addEventListener('popstate', (e) => {
 });
 
 
+// ══════════════ #SELMODE 範囲選択モード（PEGエディタから移植） ══════════════
+//
+// 【使い方】
+//   ヘッダーの点線四角ボタンをタップ → 選択モード開始（今のカーソル位置が始点）
+//   → スクロールして、終わりにしたい位置をタップ → 始点からそこまでが選択される
+//   → コピー／切り取り／削除 を押す。もう一度点線四角ボタンを押すと選択モード終了。
+//
+// 【仕組み】
+//   ブラウザの長押し選択は使わず、「始点を覚えておき、タップで動いたカーソル位置との間を
+//   選択範囲にする」方式。キーボードは inputmode="none" で出さないようにしている。
+
+const btnSelMode   = $('btnSelMode');
+const selToolbar   = $('selToolbar');
+
+var selState = 'off';      // 'off' | 'marking'
+var selAnchor = -1;        // 選択の始点（固定する側）
+var selPoller = null;
+var selLastCur = -1;
+
+// ── 見た目の切り替え ──
+function updateSelModeUI() {
+  if (selState === 'marking') {
+    toolbar.style.display = 'none';
+    selToolbar.classList.add('active');
+    btnSelMode.classList.add('sel-active');
+  } else {
+    selToolbar.classList.remove('active');
+    applyToolbarVisibility(); // ツールバーは「出す／隠す」の設定どおりに戻す
+    btnSelMode.classList.remove('sel-active');
+  }
+}
+
+// ── 選択モード開始 ──
+function startSelMode() {
+  // 検索ナビが出ていたら閉じる（ツールバーの表示が競合するため）
+  if (searchNav.classList.contains('active')) closeSearchNav();
+  // テンプレ・罫線ポップアップが開いていたら閉じる
+  if (tplPopup.classList.contains('open') || hrPopup.classList.contains('open')) {
+    tplPopup.classList.remove('open');
+    hrPopup.classList.remove('open');
+    removeCursorMarker();
+  }
+  selState = 'marking';
+  selAnchor = editor.selectionStart;
+  editor.setSelectionRange(selAnchor, selAnchor);
+  editor.setAttribute('inputmode', 'none');
+  updateSelModeUI();
+  startSelPoll();
+}
+
+// ── 選択モード終了（選択は解除してカーソルだけ残す） ──
+function cancelSelMode() {
+  if (selState === 'off') return;
+  stopSelPoll();
+  selState = 'off';
+  selAnchor = -1;
+  const pos = editor.selectionEnd;
+  editor.setSelectionRange(pos, pos);
+  editor.removeAttribute('inputmode');
+  updateSelModeUI();
+}
+
+// ── カーソル移動を監視して、始点〜カーソルを選択範囲として表示 ──
+function startSelPoll() {
+  if (selPoller) return;
+  selLastCur = selAnchor;
+  selPoller = setInterval(() => {
+    if (selState !== 'marking') { stopSelPoll(); return; }
+    const ss = editor.selectionStart;
+    const se = editor.selectionEnd;
+    let cur;
+    if (ss === se) {
+      cur = ss;
+    } else {
+      cur = (ss === selAnchor) ? se : ss;
+    }
+    if (cur === selLastCur) return;
+    selLastCur = cur;
+    editor.setSelectionRange(Math.min(selAnchor, cur), Math.max(selAnchor, cur));
+  }, 80);
+}
+
+function stopSelPoll() {
+  if (selPoller) { clearInterval(selPoller); selPoller = null; }
+}
+
+// ── クリップボードに書き込む（使えなければ従来の方式で） ──
+async function writeSelClipboard(text, ss, se) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // 下の方式で再挑戦
+    }
+  }
+  try {
+    editor.focus();
+    editor.setSelectionRange(ss, se);
+    return document.execCommand('copy');
+  } catch (e) {
+    return false;
+  }
+}
+
+// ── 選択範囲のテキストを消す（消す前の状態をUndoに記録） ──
+function removeSelRange(ss, se) {
+  saveUndoState();
+  editor.value = editor.value.slice(0, ss) + editor.value.slice(se);
+  editor.setSelectionRange(ss, ss);
+  updateUndoButtons();
+  updateCharCount();
+  autosave();
+}
+
+// ── コピー／切り取り ──
+async function selCopyAndExit(cut) {
+  const ss = editor.selectionStart;
+  const se = editor.selectionEnd;
+  if (ss === se) { cancelSelMode(); showToast('範囲が選択されていません'); return; }
+  const text = editor.value.substring(ss, se);
+
+  stopSelPoll();
+  const ok = await writeSelClipboard(text, ss, se);
+  cancelSelMode();
+
+  if (!ok) {
+    showToast('コピーに失敗しました');
+    return;
+  }
+  if (cut) {
+    removeSelRange(ss, se);
+    showToast('切り取りました');
+  } else {
+    showToast('コピーしました（' + text.length + '文字）');
+  }
+  const pos = cut ? ss : se;
+  editor.focus();
+  editor.setSelectionRange(pos, pos);
+}
+
+// ── 削除 ──
+function selDeleteAndExit() {
+  const ss = editor.selectionStart;
+  const se = editor.selectionEnd;
+  if (ss === se) { cancelSelMode(); showToast('範囲が選択されていません'); return; }
+  cancelSelMode();
+  removeSelRange(ss, se);
+  showToast('削除しました');
+  editor.focus();
+  editor.setSelectionRange(ss, ss);
+}
+
+// ── 範囲選択ボタン（タップで開始／もう一度で終了） ──
+// touchend で処理し preventDefault することで、エディタからフォーカスを奪わない
+let selBtnTouchHandled = false;
+btnSelMode.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  selBtnTouchHandled = true;
+  selState === 'off' ? startSelMode() : cancelSelMode();
+}, { passive: false });
+btnSelMode.addEventListener('click', () => {
+  if (selBtnTouchHandled) { selBtnTouchHandled = false; return; }
+  selState === 'off' ? startSelMode() : cancelSelMode();
+});
+
+// ── 選択モード用バーのボタン ──
+// mousedown / touchstart の既定動作を止めて、エディタの選択範囲が消えないようにする
+[$('btnSelCopy'), $('btnSelCut'), $('btnSelDelete')].forEach(btn => {
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+});
+$('btnSelCopy').addEventListener('click', () => selCopyAndExit(false));
+$('btnSelCut').addEventListener('click', () => selCopyAndExit(true));
+$('btnSelDelete').addEventListener('click', () => selDeleteAndExit());
+
+
+// ══════════════ #TBTOGGLE ツールバーの表示／非表示 ══════════════
+//
+// 【動き】
+//   ヘッダー右端のボタンで、二段目のツールバー（H3・罫線・テンプレ・文字数など）を出し入れする。
+//   出しているか隠しているかは端末に記憶し、次に開いたときも同じ状態にする（最初は隠した状態）。
+//   範囲選択モード・検索ナビ・プレビューの間は、設定にかかわらずツールバーは隠れる。
+//   それらが終わったら、applyToolbarVisibility() で設定どおりの状態に戻す。
+
+const btnToolbarToggle = $('btnToolbarToggle');
+const btnPreviewBack   = $('btnPreviewBack');
+const TOOLBAR_KEY = 'pegmemo_toolbar_visible';
+
+var toolbarVisible = false;
+try {
+  toolbarVisible = localStorage.getItem(TOOLBAR_KEY) === '1';
+} catch (e) {
+  toolbarVisible = false;
+}
+
+// ツールバーを、今の設定と画面の状態に合わせて出す／隠す
+function applyToolbarVisibility() {
+  const busy = App.isPreview ||
+    selState !== 'off' ||
+    searchNav.classList.contains('active');
+  toolbar.style.display = (toolbarVisible && !busy) ? '' : 'none';
+  btnToolbarToggle.classList.toggle('tb-active', toolbarVisible);
+}
+
+// 罫線・テンプレのポップアップが開いていたら閉じる
+function closeToolbarPopups() {
+  const hr = $('hrPopup');
+  const tpl = $('tplPopup');
+  if (hr.classList.contains('open') || tpl.classList.contains('open')) {
+    hr.classList.remove('open');
+    tpl.classList.remove('open');
+    removeCursorMarker();
+  }
+}
+
+function toggleToolbar() {
+  // 範囲選択モード中・検索中は、先にそれを終わらせる（ツールバーと同じ段を使うため）
+  cancelSelMode();
+  if (searchNav.classList.contains('active')) closeSearchNav();
+  closeToolbarPopups();
+  toolbarVisible = !toolbarVisible;
+  try {
+    localStorage.setItem(TOOLBAR_KEY, toolbarVisible ? '1' : '0');
+  } catch (e) {
+    // 保存できなくても切り替え自体は行う
+  }
+  applyToolbarVisibility();
+}
+
+// touchend で処理し preventDefault することで、エディタからフォーカスを奪わない
+// （文字入力中にツールバーを出しても、キーボードが閉じない）
+let tbToggleTouchHandled = false;
+btnToolbarToggle.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  tbToggleTouchHandled = true;
+  toggleToolbar();
+}, { passive: false });
+btnToolbarToggle.addEventListener('click', () => {
+  if (tbToggleTouchHandled) { tbToggleTouchHandled = false; return; }
+  toggleToolbar();
+});
+btnToolbarToggle.addEventListener('mousedown', (e) => e.preventDefault());
+
+// プレビュー中だけ出る◀ボタン：編集画面に戻る
+btnPreviewBack.addEventListener('click', () => closePreview());
+
+// 起動時に記憶していた状態を反映
+applyToolbarVisibility();
+
+
 // ══════════════ #MENU ハンバーガーメニュー（保存・新規・履歴） ══════════════
 
 const menuOverlay       = $('menuOverlay');
@@ -3846,6 +4350,9 @@ const importFileInput   = $('importFileInput');
 const impExpOverlay     = $('impExpOverlay');
 
 function openMenu() {
+  cancelSelMode(); // 範囲選択モード中なら終了
+  // キーボードが出ていたら閉じる（パネル下部がキーボードに隠れないように）
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   menuOverlay.classList.add('active');
   menuPanel.classList.add('active');
   if (!panelHistoryState) {
@@ -4055,64 +4562,135 @@ importFileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
 
+  let data;
   try {
     const text = await file.text();
-    const data = JSON.parse(text);
+    data = JSON.parse(text);
+  } catch (err) {
+    showToast('ファイルを読み込めませんでした');
+    console.error('Import read error:', err);
+    return;
+  }
 
-    if (data.appName !== 'PEGmemo') {
-      showToast('PEGメモのバックアップファイルではありません');
+  if (!data || data.appName !== 'PEGmemo') {
+    showToast('PEGメモのバックアップファイルではありません');
+    return;
+  }
+
+  // バックアップの中身を整える（日時は Date に変換、IDは元の値を引き継ぐ）
+  const now = new Date();
+  const folders = (Array.isArray(data.folders) ? data.folders : [])
+    .filter(f => f && typeof f.name === 'string')
+    .map(f => {
+      const createdAt = toDateOr(f.createdAt, now);
+      return { id: f.id, name: f.name, createdAt, updatedAt: toDateOr(f.updatedAt, createdAt) };
+    });
+  const docs = (Array.isArray(data.docs) ? data.docs : [])
+    .filter(d => d && typeof d.content === 'string')
+    .map(d => {
+      const createdAt = toDateOr(d.createdAt, now);
+      return {
+        id: d.id,
+        name: typeof d.name === 'string' ? d.name : '無題',
+        content: d.content,
+        folderId: d.folderId,
+        createdAt,
+        updatedAt: toDateOr(d.updatedAt, createdAt),
+      };
+    });
+  const tpls = (Array.isArray(data.customTemplates) ? data.customTemplates : [])
+    .filter(t => t && typeof t.content === 'string')
+    .map(t => {
+      const createdAt = toDateOr(t.createdAt, now);
+      return {
+        id: t.id,
+        title: typeof t.title === 'string' ? t.title : '',
+        content: t.content,
+        createdAt,
+        updatedAt: toDateOr(t.updatedAt, createdAt),
+      };
+    });
+
+  if (folders.length === 0 && docs.length === 0 && tpls.length === 0) {
+    showToast('バックアップにデータがありません');
+    return;
+  }
+
+  assignImportIds(folders);
+  assignImportIds(docs);
+  assignImportIds(tpls);
+
+  // 存在しないフォルダを指している文書は「フォルダなし」にする
+  const folderIds = new Set(folders.map(f => f.id));
+  docs.forEach(d => {
+    const n = Number(d.folderId);
+    d.folderId = folderIds.has(n) ? n : null;
+  });
+
+  showLibConfirm(
+    'バックアップで置き換えますか？',
+    '今あるすべての文書・フォルダ・カスタムテンプレートが削除され、バックアップの内容（文書 ' +
+      docs.length + '件、フォルダ ' + folders.length + '件、テンプレート ' + tpls.length +
+      '件）に置き換わります。この操作は取り消せません。',
+    '置き換える',
+    async () => {
+      try {
+        saveCurrentTabState();
+        await replaceAllData(folders, docs, tpls);
+        syncTabsAfterReplace(docs);
+        if (menuPanel.classList.contains('active')) loadMenuHistory();
+        if (libraryPanel.classList.contains('active')) renderLibrary();
+        showToast('置き換え完了: 文書 ' + docs.length + '件、フォルダ ' + folders.length +
+          '件、テンプレート ' + tpls.length + '件');
+      } catch (err) {
+        showToast('インポートに失敗しました（データは変更されていません）');
+        console.error('Import error:', err);
+      }
+    }
+  );
+});
+
+// 置き換え後、開いているタブを新しいデータに合わせる
+// ・置き換え後に存在しない文書のタブ → 内容を残したまま「未保存のタブ」にする
+// ・存在する文書で、未編集のタブ → バックアップの内容に差し替える
+// ・存在する文書で、編集中のタブ → 編集内容はそのまま残す（名前だけ合わせる）
+function syncTabsAfterReplace(docs) {
+  const docMap = {};
+  docs.forEach(d => { docMap[d.id] = d; });
+  const active = getActiveTab();
+
+  App.tabs.forEach(tab => {
+    if (tab.docId === null) return;
+    const d = docMap[tab.docId];
+    if (!d) {
+      tab.docId = null;
+      tab.isDirty = true;
       return;
     }
-
-    let countDocs = 0;
-    let countFolders = 0;
-    let countTemplates = 0;
-
-    // フォルダをインポート（旧ID→新IDの対応表を作る）
-    const folderIdMap = {};
-    if (data.folders && data.folders.length > 0) {
-      for (const f of data.folders) {
-        const newFolder = await saveNewFolder(f.name);
-        folderIdMap[f.id] = newFolder.id;
-        countFolders++;
-      }
+    tab.docName = d.name;
+    if (!tab.isDirty && tab.content !== d.content) {
+      tab.content = d.content;
+      tab.cursorStart = 0;
+      tab.cursorEnd = 0;
+      tab.undoStack = [];
+      tab.redoStack = [];
     }
+  });
 
-    // 文書をインポート（folderIdを新IDに変換）
-    if (data.docs && data.docs.length > 0) {
-      for (const d of data.docs) {
-        const doc = await saveNewDoc(d.name, d.content);
-        const newFolderId = d.folderId ? (folderIdMap[d.folderId] || null) : null;
-        if (newFolderId) {
-          await updateDoc(doc.id, { folderId: newFolderId });
-        }
-        countDocs++;
-      }
+  if (active) {
+    if (editor.value !== active.content) {
+      editor.value = active.content;
+      editor.selectionStart = active.cursorStart;
+      editor.selectionEnd = active.cursorEnd;
+      saveUndoState();
     }
-
-    // カスタムテンプレートをインポート
-    if (data.customTemplates && data.customTemplates.length > 0) {
-      for (const t of data.customTemplates) {
-        await saveNewCustomTemplate(t.title, t.content);
-        countTemplates++;
-      }
-    }
-
-    const parts = [];
-    if (countDocs > 0) parts.push('文書 ' + countDocs + '件');
-    if (countFolders > 0) parts.push('フォルダ ' + countFolders + '件');
-    if (countTemplates > 0) parts.push('テンプレート ' + countTemplates + '件');
-
-    if (parts.length > 0) {
-      showToast('インポート完了: ' + parts.join('、'));
-    } else {
-      showToast('インポートするデータがありませんでした');
-    }
-  } catch (e) {
-    showToast('インポートに失敗しました');
-    console.error('Import error:', e);
+    if (App.isPreview) renderPreview();
   }
-});
+  updateDocNameDisplay();
+  updateCharCount();
+  updateUndoButtons();
+  autosave();
+}
 
 // 共有非対応チェック（起動時にボタンを無効化）
 if (!navigator.canShare) {
@@ -4965,7 +5543,10 @@ const tabList       = $('tabList');
 const tabPanelCount = $('tabPanelCount');
 
 function openTabPanel() {
+  cancelSelMode(); // 範囲選択モード中なら終了
   saveCurrentTabState();
+  // キーボードが出ていたら閉じる（パネル下部のボタンがキーボードに隠れないように）
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   renderTabList();
   tabOverlay.classList.add('active');
   tabPanel.classList.add('active');
@@ -5808,136 +6389,164 @@ function convertInline(text) {
 }
 
 
-// ══════════════ #PREVIEW プレビュー表示（HTML/MD切り替え） ══════════════
+// ══════════════ #PREVIEW プレビュー表示（HTML） ══════════════
 
-let previewLongPressTimer = null;
-
+// タブパネルの▶ボタン：パネルを閉じてプレビューを開く
+// 【戻る履歴について】
+//   タブパネルを開いたときに「パネル用の履歴」を1つ積んでいる。
+//   普通に閉じると history.back() でそれを消すが、その直後にプレビュー用の履歴を積むと
+//   順番が前後してスマホの戻るボタンの動きがおかしくなる。
+//   そこで、パネル用の履歴をそのまま「プレビュー用の履歴」に書き換えて使い回す。
 btnPreview.addEventListener('click', () => {
-  App.isPreview ? closePreview() : openPreview();
+  if (App.isPreview) {
+    // すでにプレビュー中ならパネルを閉じるだけ
+    closeTabPanel();
+    return;
+  }
+  tabPanel.classList.remove('active');
+  tabOverlay.classList.remove('active');
+  if (panelHistoryState === 'tabPanel') {
+    panelHistoryState = null;
+    openPreview(true);   // パネル用の履歴を書き換える
+  } else {
+    openPreview(false);  // 新しく履歴を積む
+  }
 });
 
-btnPreview.addEventListener('touchstart', (e) => {
-  previewLongPressTimer = setTimeout(() => {
-    previewLongPressTimer = 'fired';
-    togglePreviewMode();
-  }, 500);
-}, { passive: true });
-
-btnPreview.addEventListener('touchend', () => {
-  if (previewLongPressTimer === 'fired') { previewLongPressTimer = null; return; }
-  clearTimeout(previewLongPressTimer);
-  previewLongPressTimer = null;
-});
-
-btnPreview.addEventListener('touchcancel', () => {
-  clearTimeout(previewLongPressTimer);
-  previewLongPressTimer = null;
-});
-
-function togglePreviewMode() {
-  App.previewMode = App.previewMode === 'html' ? 'md' : 'html';
-  const label = App.previewMode === 'html' ? 'HTMLプレビュー' : 'MDプレビュー';
-  previewModeLabel.textContent = label;
-  showToast(label + 'に切替');
-  if (App.isPreview) renderPreview();
-}
-
-function openPreview() {
+function openPreview(replaceHistory) {
+  cancelSelMode(); // 範囲選択モード中なら終了
+  closeToolbarPopups();
+  hideScrollFab();
+  btnSelMode.style.display = 'none';
   App.isPreview = true;
   renderPreview();
   editor.style.display = 'none';
   preview.classList.add('active');
   previewIndicator.classList.add('active');
-  btnPreview.textContent = '◀';
-  document.getElementById('toolbar').style.display = 'none';
+  // ヘッダー右端：ツールバーボタンを隠して、同じ場所に◀（編集に戻る）を出す
+  btnToolbarToggle.style.display = 'none';
+  btnPreviewBack.style.display = '';
+  applyToolbarVisibility(); // プレビュー中はツールバーを隠す
   btnUndo.style.display = 'none';
   btnRedo.style.display = 'none';
-  history.pushState({ preview: true }, '');
+  if (replaceHistory) {
+    history.replaceState({ preview: true }, '');
+  } else {
+    history.pushState({ preview: true }, '');
+  }
 }
 
 function closePreview() {
+  hideScrollFab();
   App.isPreview = false;
   editor.style.display = '';
   preview.classList.remove('active');
   previewIndicator.classList.remove('active');
-  btnPreview.textContent = '▶';
-  document.getElementById('toolbar').style.display = '';
+  // ヘッダー右端を、ツールバーボタンに戻す
+  btnPreviewBack.style.display = 'none';
+  btnToolbarToggle.style.display = '';
+  applyToolbarVisibility(); // ツールバーは「出す／隠す」の設定どおりに戻す
   btnUndo.style.display = '';
   btnRedo.style.display = '';
+  btnSelMode.style.display = '';
 }
 
 function renderPreview() {
-  const text = editor.value;
-  if (App.previewMode === 'html') {
-    preview.innerHTML = convertToHtml(text);
-  } else {
-    preview.innerHTML = renderMarkdownPreview(text);
-  }
-}
-
-function renderMarkdownPreview(text) {
-  const lines = text.split('\n');
-  const output = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (trimmed === '') {
-      let emptyCount = 0;
-      while (i < lines.length && lines[i].trim() === '') { emptyCount++; i++; }
-      i--;
-      if (emptyCount >= 2) {
-        for (let e = 0; e < emptyCount - 1; e++) output.push('<p class="spacer">&nbsp;</p>');
-      }
-      continue;
-    }
-
-    if (trimmed.startsWith('<')) {
-      output.push('<pre><code>' + escapeHtml(trimmed) + '</code></pre>');
-      continue;
-    }
-
-    if (trimmed.startsWith('### ')) { output.push('<h3>' + convertInlineForMd(trimmed.substring(4)) + '</h3>'); continue; }
-    if (trimmed.startsWith('## '))  { output.push('<h3>' + convertInlineForMd(trimmed.substring(3)) + '</h3>'); continue; }
-    if (/^-{3,}$/.test(trimmed))    { output.push('<hr>'); continue; }
-
-    if (trimmed.startsWith('- ')) {
-      const items = [];
-      while (i < lines.length && lines[i].trim().startsWith('- ')) { items.push(convertInlineForMd(lines[i].trim().substring(2))); i++; }
-      i--;
-      output.push('<ul>' + items.map(it => '<li>' + it + '</li>').join('') + '</ul>');
-      continue;
-    }
-
-    if (trimmed.startsWith('> ')) {
-      output.push('<blockquote><p>' + convertInlineForMd(trimmed.substring(2)) + '</p></blockquote>');
-      continue;
-    }
-
-    const paraLines = [];
-    while (i < lines.length) {
-      const ct = lines[i].trim();
-      if (ct === '' || ct.startsWith('<') || ct.startsWith('- ') || ct.startsWith('> ') || ct.startsWith('## ') || ct.startsWith('### ') || /^-{3,}$/.test(ct)) break;
-      paraLines.push(convertInlineForMd(ct));
-      i++;
-    }
-    i--;
-    if (paraLines.length > 0) output.push('<p>' + paraLines.join('<br>') + '</p>');
-  }
-
-  return output.join('\n');
-}
-
-function convertInlineForMd(text) {
-  text = escapeHtml(text);
-  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  return text;
+  preview.innerHTML = convertToHtml(editor.value);
 }
 
 function escapeHtml(text) {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+
+// ══════════════ #SCROLLFAB ページトップ／ボトムボタン ══════════════
+//
+// 【動き】
+//   指でスクロールし始めると右下に「↑」「↓」が出て、スクロールが止まって
+//   FAB_HIDE_DELAY ミリ秒たつと消える。編集画面でもプレビュー中でも同じ。
+//   タップすると画面がいちばん上／下までスクロールする（カーソルは動かさない）。
+//   キーボードが出ているときは、キーボードを閉じてからスクロールする。
+//
+// 【指の操作だけに反応させる理由】
+//   タブ切替や検索ジャンプでもスクロールは起きるが、そのたびにボタンが出ると
+//   うるさいので、「直前に指で触っていた」ときだけ表示を始める。
+
+const scrollFab = $('scrollFab');
+var FAB_HIDE_DELAY = 1500;     // スクロールが止まってから消えるまで（ミリ秒）
+var fabHideTimer = null;
+var fabTouching = false;
+var fabLastTouchEnd = 0;
+
+// いま表示中のスクロール領域（編集中はエディタ、プレビュー中はプレビュー）
+function getScrollTarget() {
+  return App.isPreview ? preview : editor;
+}
+
+function showScrollFab() {
+  scrollFab.classList.add('show');
+  clearTimeout(fabHideTimer);
+  fabHideTimer = setTimeout(hideScrollFab, FAB_HIDE_DELAY);
+}
+
+function hideScrollFab() {
+  clearTimeout(fabHideTimer);
+  fabHideTimer = null;
+  if (scrollFab) scrollFab.classList.remove('show');
+}
+
+function onScrollForFab() {
+  if (scrollFab.classList.contains('show')) {
+    // 表示中なら、スクロールが続いている間は消えるのを先送り（指を離した後の慣性スクロールも含む）
+    showScrollFab();
+    return;
+  }
+  // 非表示のときは、指で操作した直後のスクロールだけ表示を始める
+  if (fabTouching || Date.now() - fabLastTouchEnd < 1000) {
+    showScrollFab();
+  }
+}
+
+[editor, preview].forEach(el => {
+  el.addEventListener('scroll', onScrollForFab, { passive: true });
+  el.addEventListener('touchstart', () => { fabTouching = true; }, { passive: true });
+  el.addEventListener('touchend', () => { fabTouching = false; fabLastTouchEnd = Date.now(); }, { passive: true });
+  el.addEventListener('touchcancel', () => { fabTouching = false; fabLastTouchEnd = Date.now(); }, { passive: true });
+});
+
+function scrollFabJump(toBottom) {
+  const el = getScrollTarget();
+  // エディタにフォーカスがある（キーボードが出ている／しまっただけでフォーカスが残っている）と、
+  // ブラウザが「カーソルを画面内に見せよう」としてスクロールを引き戻したり、
+  // 画面全体をずらしたりする。なので先にフォーカスを外してからスクロールする。
+  // （範囲選択モード中はキーボードが出ておらず、選択範囲を見せておきたいので外さない）
+  if (el === editor && document.activeElement === editor && selState === 'off') {
+    editor.blur();
+  }
+  const top = toBottom ? el.scrollHeight : 0;
+  try {
+    el.scrollTo({ top, behavior: 'smooth' });
+  } catch (e) {
+    el.scrollTop = top;
+  }
+  showScrollFab(); // 押した後もしばらく出しておく
+}
+
+// touchend で処理して preventDefault し、ボタン自体にフォーカスが移らないようにする
+// （エディタのフォーカスは scrollFabJump の中で外す）
+[[$('btnFabTop'), false], [$('btnFabBottom'), true]].forEach(([btn, toBottom]) => {
+  let handled = false;
+  btn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    handled = true;
+    scrollFabJump(toBottom);
+  }, { passive: false });
+  btn.addEventListener('click', () => {
+    if (handled) { handled = false; return; }
+    scrollFabJump(toBottom);
+  });
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+});
 
 
 // ══════════════ #MODAL HTML出力モーダル ══════════════
