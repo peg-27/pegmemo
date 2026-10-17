@@ -7,7 +7,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#F7EDF6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#F7EDF6" media="(prefers-color-scheme: dark)">
-<meta name="app-version" content="9">
+<meta name="app-version" content="10">
 <title>PEG memo</title>
 <link rel="manifest" href="/pegmemo/manifest.json">
 <link rel="icon" type="image/png" sizes="192x192" href="/pegmemo/icon-192.png">
@@ -80,6 +80,7 @@ function showUpdateNotification(newWorker) {
   #TABPANEL      タブパネル（右スライド・タブ切替・タブ閉じ・HTMLプレビューボタン）
   #MODAL         HTML出力モーダル・タブ名編集モーダル
   #CUSTOMTPL     カスタムテンプレート
+  #STDTPL        標準テンプレの編集（テンプレドロップダウンの中身を追加・削除・並べ替え・編集）
   #STATE         アプリ状態・DOM参照
   #DB            IndexedDBライブラリ（文書の保存・読出・更新・削除）
   #TAB           タブ管理（作成・切替・削除）
@@ -452,6 +453,12 @@ function showUpdateNotification(newWorker) {
   }
   .tpl-popup-item:last-child { border-bottom: none; }
   .tpl-popup-item:active { background: var(--btn-hover); }
+  /* ドロップダウンの一番下「標準テンプレを編集…」 */
+  .tpl-popup-item.tpl-popup-edit {
+    font-size: 13px;
+    color: var(--accent);
+    background: var(--bg);
+  }
 
 .search-nav-buttons {
     display: flex;
@@ -510,18 +517,7 @@ function showUpdateNotification(newWorker) {
     <div class="toolbar-sep"></div>
     <button class="btn template-select" id="templateBtn">テンプレ</button>
     <div class="tpl-popup" id="tplPopup">
-      <div class="tpl-popup-item" data-tpl="font-style">フォントスタイル</div>
-      <div class="tpl-popup-item" data-tpl="top-anchor">ページトップアンカー</div>
-      <div class="tpl-popup-item" data-tpl="title-template">タイトルテンプレ</div>
-      <div class="tpl-popup-item" data-tpl="lead-disclaimer">リード文＋免責文</div>
-      <div class="tpl-popup-item" data-tpl="toc">目次ボックス</div>
-      <div class="tpl-popup-item" data-tpl="end">END</div>
-      <div class="tpl-popup-item" data-tpl="end-note1">END下①：解釈について</div>
-      <div class="tpl-popup-item" data-tpl="end-note2">END下②：歌詞引用</div>
-      <div class="tpl-popup-item" data-tpl="end-note3">END下③：転載禁止</div>
-      <div class="tpl-popup-item" data-tpl="footer1">末尾①：考察方法リンク</div>
-      <div class="tpl-popup-item" data-tpl="footer2">末尾②：作成プロセスリンク</div>
-      <div class="tpl-popup-item" data-tpl="top-button">ページトップボタン</div>
+      <!-- 中身は #STDTPL の renderTplPopup() で作る（保存されている標準テンプレの並び＋「標準テンプレを編集…」） -->
     </div>
     <div class="toolbar-sep"></div>
     <button class="btn" id="btnCustomTpl" title="カスタムテンプレート">カスタム</button>
@@ -2166,9 +2162,10 @@ function showUpdateNotification(newWorker) {
 
   /* --- 新規文書ボタン（ピンク背景） --- */
   .tab-panel-actions .btn-pink {
-    background: #F2A2C0;
-    border-color: #F2A2C0;
+    background: #F29BC1;
+    border-color: #F29BC1;
     color: #fff;
+    font-weight: 600;
   }
   .tab-panel-actions .btn-pink:active { opacity: 0.8; }
   .tab-panel-actions #tabPanelNewDoc { grid-column: 1 / -1; } /* 1段目を横いっぱいに */
@@ -2536,9 +2533,9 @@ function showUpdateNotification(newWorker) {
 
   /* フッターボタン色分け */
   .btn-ctpl-new {
-    background: #F2A2C0;
+    background: #F29BC1;
     color: #fff;
-    border-color: #F2A2C0;
+    border-color: #F29BC1;
   }
   .btn-ctpl-new:hover, .btn-ctpl-new:active {
     background: var(--accent-hover);
@@ -2633,6 +2630,141 @@ function showUpdateNotification(newWorker) {
       <div class="modal-footer">
         <button class="btn btn-accent" id="btnCtplSave" style="flex:1;">保存</button>
         <button class="btn" id="btnCtplEditCancel">キャンセル</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════ #STDTPL 標準テンプレの編集 ══════════════ -->
+<style>
+  .stpl-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .stpl-overlay .modal {
+    border-radius: 16px;
+    width: calc(100% - 32px);
+    max-height: 85vh;
+    animation: none;
+  }
+  .stpl-overlay .modal-header {
+    padding: 10px 16px 6px;
+    border-bottom: none;
+  }
+  .stpl-overlay .modal-body {
+    padding: 0 12px 8px;
+  }
+  /* テンプレの一覧（ドロップダウンと同じ順番で縦に並ぶ） */
+  .stpl-list {
+    max-height: 32vh;
+    overflow-y: auto;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+  }
+  .stpl-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .stpl-item:last-child { border-bottom: none; }
+  .stpl-item.selected { background: var(--accent-light); font-weight: 600; }
+  .stpl-item-name {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* 「編集済み」「追加」の小さな印 */
+  .stpl-tag {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--accent);
+    border: 1px solid var(--accent-light);
+    border-radius: 8px;
+    padding: 1px 6px;
+    background: var(--surface);
+  }
+  .stpl-empty {
+    padding: 20px 0;
+    text-align: center;
+    color: var(--text-mid);
+    font-size: 13px;
+  }
+  /* 上へ・下へボタン */
+  .stpl-move-bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .stpl-move-bar .btn { flex: 1; }
+  /* 「すべて初期状態に戻す」 */
+  .stpl-reset-all {
+    display: block;
+    margin: 0 auto 12px;
+    padding: 6px 12px;
+    border: none;
+    background: none;
+    color: var(--text-mid);
+    font-size: 12px;
+    font-family: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+</style>
+
+<!-- 標準テンプレ編集モーダルHTML -->
+<div class="modal-overlay stpl-overlay" id="stdTplModal">
+  <div class="modal">
+
+    <!-- ===== 一覧ビュー ===== -->
+    <div id="stplListView">
+      <div class="modal-header">
+        <h3>標準テンプレの編集</h3>
+        <button class="btn btn-icon" id="btnCloseStpl" style="border:none;font-size:20px;">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="stpl-list" id="stplList"></div>
+        <div class="stpl-move-bar">
+          <button class="btn" id="btnStplUp">↑ 上へ</button>
+          <button class="btn" id="btnStplDown">↓ 下へ</button>
+        </div>
+        <div class="ctpl-preview-area">
+          <div class="ctpl-preview-label">プレビュー</div>
+          <div class="ctpl-preview-content" id="stplPreview"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ctpl-new" id="btnStplNew" style="flex:1;">新規作成</button>
+        <button class="btn" id="btnStplDelete" style="flex:1;">削除</button>
+        <button class="btn btn-ctpl-edit" id="btnStplEdit" style="flex:1;">編集</button>
+      </div>
+      <button class="stpl-reset-all" id="btnStplResetAll">すべて初期状態に戻す</button>
+    </div>
+
+    <!-- ===== 編集ビュー ===== -->
+    <div id="stplEditView" style="display:none;">
+      <div class="modal-header">
+        <h3 id="stplEditTitle">編集</h3>
+        <button class="btn btn-icon" id="btnCloseStplEdit" style="border:none;font-size:20px;">✕</button>
+      </div>
+      <div class="ctpl-edit-body">
+        <input type="text" id="stplLabelInput" placeholder="表示名（ドロップダウンに出る名前）" maxlength="100">
+        <textarea id="stplContentInput" placeholder="テンプレート内容を入力"></textarea>
+        <button class="btn" id="btnStplRestoreOne" style="display:none;">初期状態の文面に戻す</button>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-accent" id="btnStplSave" style="flex:1;">保存</button>
+        <button class="btn" id="btnStplEditCancel">キャンセル</button>
       </div>
     </div>
 
@@ -4520,7 +4652,8 @@ async function doExport() {
       exportedAt: new Date().toISOString(),
       docs: docs,
       folders: folders,
-      customTemplates: customTemplates
+      customTemplates: customTemplates,
+      stdTemplates: App.stdTemplates
     };
 
     const jsonStr = JSON.stringify(exportData, null, 2);
@@ -4611,7 +4744,11 @@ importFileInput.addEventListener('change', async (e) => {
       };
     });
 
-  if (folders.length === 0 && docs.length === 0 && tpls.length === 0) {
+  // 標準テンプレ（このバージョン以降のバックアップにだけ入っている。古いバックアップなら今のまま残す）
+  const stdTpls = sanitizeStdTemplates(data.stdTemplates);
+  const stdNote = stdTpls ? '、標準テンプレ ' + stdTpls.length + '件' : '';
+
+  if (folders.length === 0 && docs.length === 0 && tpls.length === 0 && !stdTpls) {
     showToast('バックアップにデータがありません');
     return;
   }
@@ -4631,17 +4768,22 @@ importFileInput.addEventListener('change', async (e) => {
     'バックアップで置き換えますか？',
     '今あるすべての文書・フォルダ・カスタムテンプレートが削除され、バックアップの内容（文書 ' +
       docs.length + '件、フォルダ ' + folders.length + '件、テンプレート ' + tpls.length +
-      '件）に置き換わります。この操作は取り消せません。',
+      '件' + stdNote + '）に置き換わります。この操作は取り消せません。',
     '置き換える',
     async () => {
       try {
         saveCurrentTabState();
         await replaceAllData(folders, docs, tpls);
         syncTabsAfterReplace(docs);
+        if (stdTpls) {
+          App.stdTemplates = stdTpls;
+          saveStdTemplates();
+          renderTplPopup();
+        }
         if (menuPanel.classList.contains('active')) loadMenuHistory();
         if (libraryPanel.classList.contains('active')) renderLibrary();
         showToast('置き換え完了: 文書 ' + docs.length + '件、フォルダ ' + folders.length +
-          '件、テンプレート ' + tpls.length + '件');
+          '件、テンプレート ' + tpls.length + '件' + stdNote);
       } catch (err) {
         showToast('インポートに失敗しました（データは変更されていません）');
         console.error('Import error:', err);
@@ -5802,7 +5944,8 @@ function setupSwipeMenu() {
       $('libPopupOverlay').classList.contains('active') ||
       $('libConfirmOverlay').classList.contains('active') ||
       $('folderSelectOverlay').classList.contains('active') ||
-      $('renameModal').classList.contains('active')
+      $('renameModal').classList.contains('active') ||
+      $('stdTplModal').classList.contains('active')
     ) {
       tracking = false;
       return;
@@ -5930,7 +6073,7 @@ const TEMPLATES = {
   'lead-disclaimer': `ここにリード文を入れる
 
 <div style="border: 1px solid #aaa; padding: 10px;">
-<p>※本記事は、筆者とClaudeの会話によって導き出した、櫻井敦司さんの歌詞についての考察をブログ用に再構成したものです。<br>様々な解釈がある中での一つとしてお読みいただければ幸いです。<br>歌詞本文は著作権保護のため、必要最小限のみ引用しています。</p>
+<p>※本記事は、筆者とClaudeの会話によって導き出した、櫻井敦司さんの歌詞についての考察をエッセイとして執筆したものです。<br>様々な解釈がある中での一つとしてお読みいただければ幸いです。<br>歌詞本文は著作権保護のため、必要最小限のみ引用しています。</p>
 </div>`,
   'toc': `<div style="border: 1px solid #aaa; padding: 10px;">
 <p><span style="color: #000000;">「◯◯◯（曲名）」歌詞考察</span></p>
@@ -5995,10 +6138,312 @@ templateBtn.addEventListener('click', (e) => {
 tplPopup.addEventListener('click', (e) => {
   const item = e.target.closest('.tpl-popup-item');
   if (!item) return;
-  const key = item.dataset.tpl;
-  const tpl = TEMPLATES[key];
-  if (tpl) { insertLine(tpl); showToast('テンプレートを挿入しました'); }
+  // 一番下の「標準テンプレを編集…」
+  if (item.dataset.edit) {
+    tplPopup.classList.remove('open');
+    removeCursorMarker();
+    openStdTplModal();
+    return;
+  }
+  const tpl = App.stdTemplates[Number(item.dataset.idx)];
+  if (tpl) { insertLine(tpl.content); showToast('テンプレートを挿入しました'); }
   tplPopup.classList.remove('open');
+});
+
+
+// ══════════════ #STDTPL 標準テンプレの編集 ══════════════
+//
+// 【仕組み】
+//   ドロップダウンの並びと文面は、端末（localStorage）に保存した一覧から作る。
+//   一度も編集していないうちは、上の TEMPLATES に書いてある文面（初期状態）をそのまま使う。
+//   編集・追加・削除・並べ替えをすると、その時点の一覧が丸ごと保存され、以後はそちらが使われる。
+//   「すべて初期状態に戻す」を押すと保存した一覧を消し、TEMPLATES の内容に戻る。
+//   バックアップ（エクスポート／インポート）にも含まれる。
+
+// 初期状態の並び（ここの順番が、編集前のドロップダウンの順番）
+const DEFAULT_STD_TEMPLATES = [
+  { key: 'font-style',      label: 'フォントスタイル' },
+  { key: 'top-anchor',      label: 'ページトップアンカー' },
+  { key: 'title-template',  label: 'タイトルテンプレ' },
+  { key: 'lead-disclaimer', label: 'リード文＋免責文' },
+  { key: 'toc',             label: '目次ボックス' },
+  { key: 'end',             label: 'END' },
+  { key: 'end-note1',       label: 'END下①：解釈について' },
+  { key: 'end-note2',       label: 'END下②：歌詞引用' },
+  { key: 'end-note3',       label: 'END下③：転載禁止' },
+  { key: 'footer1',         label: '末尾①：考察方法リンク' },
+  { key: 'footer2',         label: '末尾②：作成プロセスリンク' },
+  { key: 'top-button',      label: 'ページトップボタン' },
+].map(t => ({ key: t.key, label: t.label, content: TEMPLATES[t.key] }));
+
+const STD_TPL_KEY = 'pegmemo_std_templates';
+
+function cloneDefaultStdTemplates() {
+  return DEFAULT_STD_TEMPLATES.map(t => ({ key: t.key, label: t.label, content: t.content }));
+}
+
+function getDefaultStdTemplate(key) {
+  if (!key) return null;
+  return DEFAULT_STD_TEMPLATES.find(t => t.key === key) || null;
+}
+
+// 保存データ・バックアップの中身を整える（形がおかしければ null）
+function sanitizeStdTemplates(data) {
+  if (!Array.isArray(data)) return null;
+  return data
+    .filter(t => t && typeof t.content === 'string')
+    .map(t => ({
+      key: (typeof t.key === 'string' && t.key) ? t.key : null,
+      label: (typeof t.label === 'string' && t.label.trim()) ? t.label : '（名前なし）',
+      content: t.content,
+    }));
+}
+
+function loadStdTemplates() {
+  try {
+    const raw = localStorage.getItem(STD_TPL_KEY);
+    if (raw) {
+      const list = sanitizeStdTemplates(JSON.parse(raw));
+      if (list) return list;
+    }
+  } catch (e) {
+    // 読めなければ初期状態を使う
+  }
+  return cloneDefaultStdTemplates();
+}
+
+function saveStdTemplates() {
+  try {
+    localStorage.setItem(STD_TPL_KEY, JSON.stringify(App.stdTemplates));
+    return true;
+  } catch (e) {
+    showToast('保存に失敗しました');
+    return false;
+  }
+}
+
+App.stdTemplates = loadStdTemplates();
+
+// --- ドロップダウンの中身を作る ---
+function renderTplPopup() {
+  tplPopup.innerHTML = '';
+  App.stdTemplates.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'tpl-popup-item';
+    div.dataset.idx = i;
+    div.textContent = t.label;
+    tplPopup.appendChild(div);
+  });
+  const edit = document.createElement('div');
+  edit.className = 'tpl-popup-item tpl-popup-edit';
+  edit.dataset.edit = '1';
+  edit.textContent = '標準テンプレを編集…';
+  tplPopup.appendChild(edit);
+}
+renderTplPopup();
+
+// --- 編集モーダル ---
+let stplSelectedIdx = -1;    // 一覧で選んでいる項目（-1 = なし）
+let stplEditingIdx = null;   // 編集ビューで編集中の項目（null = 新規作成）
+
+function openStdTplModal() {
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  stplSelectedIdx = -1;
+  $('stplListView').style.display = '';
+  $('stplEditView').style.display = 'none';
+  renderStplList();
+  $('stdTplModal').classList.add('active');
+}
+
+function closeStdTplModal() {
+  $('stdTplModal').classList.remove('active');
+}
+
+function showStplListView() {
+  $('stplListView').style.display = '';
+  $('stplEditView').style.display = 'none';
+  renderStplList();
+}
+
+// 初期状態から変わっているか（'edited' 編集済み／'added' 追加したもの／'' そのまま）
+function stplStatus(t) {
+  const def = getDefaultStdTemplate(t.key);
+  if (!def) return 'added';
+  return (def.content !== t.content || def.label !== t.label) ? 'edited' : '';
+}
+
+function renderStplList(scrollToSelected) {
+  const list = $('stplList');
+  list.innerHTML = '';
+  if (App.stdTemplates.length === 0) {
+    list.innerHTML = '<div class="stpl-empty">テンプレートがありません</div>';
+  }
+  App.stdTemplates.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'stpl-item' + (i === stplSelectedIdx ? ' selected' : '');
+    div.dataset.idx = i;
+    const name = document.createElement('span');
+    name.className = 'stpl-item-name';
+    name.textContent = t.label;
+    div.appendChild(name);
+    const st = stplStatus(t);
+    if (st) {
+      const tag = document.createElement('span');
+      tag.className = 'stpl-tag';
+      tag.textContent = (st === 'added') ? '追加' : '編集済み';
+      div.appendChild(tag);
+    }
+    list.appendChild(div);
+  });
+
+  const has = stplSelectedIdx >= 0 && stplSelectedIdx < App.stdTemplates.length;
+  $('stplPreview').textContent = has ? App.stdTemplates[stplSelectedIdx].content : '';
+  $('btnStplEdit').disabled = !has;
+  $('btnStplDelete').disabled = !has;
+  $('btnStplUp').disabled = !has || stplSelectedIdx === 0;
+  $('btnStplDown').disabled = !has || stplSelectedIdx === App.stdTemplates.length - 1;
+
+  if (scrollToSelected) {
+    const sel = list.querySelector('.selected');
+    if (sel) {
+      // 一覧の枠の中だけをスクロールして、選んでいる項目を見える位置に出す
+      const top = sel.offsetTop - list.offsetTop;
+      if (top < list.scrollTop) list.scrollTop = top;
+      else if (top + sel.offsetHeight > list.scrollTop + list.clientHeight) {
+        list.scrollTop = top + sel.offsetHeight - list.clientHeight;
+      }
+    }
+  }
+}
+
+// 一覧のタップ（もう一度タップで選択解除）
+$('stplList').addEventListener('click', (e) => {
+  const item = e.target.closest('.stpl-item');
+  if (!item) return;
+  const idx = Number(item.dataset.idx);
+  stplSelectedIdx = (stplSelectedIdx === idx) ? -1 : idx;
+  renderStplList();
+});
+
+// 上へ・下へ
+function moveStpl(dir) {
+  const i = stplSelectedIdx;
+  const j = i + dir;
+  const arr = App.stdTemplates;
+  if (i < 0 || j < 0 || j >= arr.length) return;
+  const tmp = arr[i];
+  arr[i] = arr[j];
+  arr[j] = tmp;
+  stplSelectedIdx = j;
+  saveStdTemplates();
+  renderTplPopup();
+  renderStplList(true);
+}
+$('btnStplUp').addEventListener('click', () => moveStpl(-1));
+$('btnStplDown').addEventListener('click', () => moveStpl(1));
+
+// 編集ビューを開く（idx = null なら新規作成）
+function openStplEditView(idx) {
+  stplEditingIdx = idx;
+  const t = (idx === null) ? null : App.stdTemplates[idx];
+  $('stplEditTitle').textContent = (idx === null) ? '新規作成' : '編集';
+  $('stplLabelInput').value = t ? t.label : '';
+  $('stplContentInput').value = t ? t.content : '';
+  // 初期状態からあるテンプレだけ「初期状態の文面に戻す」を出す
+  $('btnStplRestoreOne').style.display = (t && getDefaultStdTemplate(t.key)) ? '' : 'none';
+  $('stplListView').style.display = 'none';
+  $('stplEditView').style.display = '';
+  setTimeout(() => $(idx === null ? 'stplLabelInput' : 'stplContentInput').focus(), 100);
+}
+
+$('btnStplNew').addEventListener('click', () => openStplEditView(null));
+$('btnStplEdit').addEventListener('click', () => {
+  if (stplSelectedIdx < 0) return;
+  openStplEditView(stplSelectedIdx);
+});
+
+// 初期状態の文面を入力欄に入れる（保存を押すまでは確定しない）
+$('btnStplRestoreOne').addEventListener('click', () => {
+  if (stplEditingIdx === null) return;
+  const def = getDefaultStdTemplate(App.stdTemplates[stplEditingIdx].key);
+  if (!def) return;
+  $('stplLabelInput').value = def.label;
+  $('stplContentInput').value = def.content;
+  showToast('初期状態の文面を入れました（保存で確定）', 2000);
+});
+
+// 保存
+$('btnStplSave').addEventListener('click', () => {
+  const label = $('stplLabelInput').value.trim();
+  const content = $('stplContentInput').value;
+  if (!label) { showToast('表示名を入力してください'); return; }
+  if (!content.trim()) { showToast('内容を入力してください'); return; }
+
+  if (stplEditingIdx === null) {
+    // 新規：選んでいる項目のすぐ下に入れる（何も選んでいなければ一番下）
+    const at = (stplSelectedIdx >= 0) ? stplSelectedIdx + 1 : App.stdTemplates.length;
+    App.stdTemplates.splice(at, 0, { key: null, label, content });
+    stplSelectedIdx = at;
+  } else {
+    const t = App.stdTemplates[stplEditingIdx];
+    t.label = label;
+    t.content = content;
+    stplSelectedIdx = stplEditingIdx;
+  }
+  if (!saveStdTemplates()) return;
+  renderTplPopup();
+  showToast(stplEditingIdx === null ? 'テンプレートを追加しました' : 'テンプレートを更新しました');
+  showStplListView();
+  renderStplList(true);
+});
+
+// 編集ビューから一覧に戻る
+$('btnStplEditCancel').addEventListener('click', showStplListView);
+$('btnCloseStplEdit').addEventListener('click', showStplListView);
+
+// 削除
+$('btnStplDelete').addEventListener('click', () => {
+  if (stplSelectedIdx < 0) return;
+  const t = App.stdTemplates[stplSelectedIdx];
+  const note = getDefaultStdTemplate(t.key)
+    ? '初期状態からあるテンプレなので、「すべて初期状態に戻す」で元に戻せます。'
+    : '追加したテンプレなので、削除すると元に戻せません。';
+  showLibConfirm(
+    'テンプレートを削除しますか？',
+    '「' + t.label + '」を削除します。' + note,
+    '削除',
+    () => {
+      App.stdTemplates.splice(stplSelectedIdx, 1);
+      stplSelectedIdx = -1;
+      saveStdTemplates();
+      renderTplPopup();
+      renderStplList();
+      showToast('テンプレートを削除しました');
+    }
+  );
+});
+
+// すべて初期状態に戻す
+$('btnStplResetAll').addEventListener('click', () => {
+  showLibConfirm(
+    'すべて初期状態に戻しますか？',
+    '標準テンプレの並びと文面が、アプリに最初から入っている状態に戻ります。追加したテンプレと、書き換えた文面は消えます。',
+    '戻す',
+    () => {
+      App.stdTemplates = cloneDefaultStdTemplates();
+      try { localStorage.removeItem(STD_TPL_KEY); } catch (e) {}
+      stplSelectedIdx = -1;
+      renderTplPopup();
+      renderStplList();
+      showToast('初期状態に戻しました');
+    }
+  );
+});
+
+// 閉じる
+$('btnCloseStpl').addEventListener('click', closeStdTplModal);
+$('stdTplModal').addEventListener('click', (e) => {
+  if (e.target === $('stdTplModal')) closeStdTplModal();
 });
 
 document.addEventListener('click', () => {
